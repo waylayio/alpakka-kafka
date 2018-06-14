@@ -1,3 +1,4 @@
+
 enablePlugins(AutomateHeaderPlugin)
 
 name := "akka-stream-kafka"
@@ -156,10 +157,12 @@ lazy val docs = project
   )
 
 lazy val Benchmark = config("bench") extend Test
+lazy val Cinn = config("cinn") extend Test
 
 lazy val benchmarks = project
   .enablePlugins(AutomateHeaderPlugin)
   .enablePlugins(DockerPlugin)
+  .enablePlugins(Cinnamon)
   .settings(commonSettings)
   .settings(
     skip in publish := true,
@@ -171,7 +174,10 @@ lazy val benchmarks = project
       "ch.qos.logback" % "logback-classic" % "1.2.3",
       "org.slf4j" % "log4j-over-slf4j" % "1.7.25",
       "com.typesafe.akka" %% "akka-slf4j" % akkaVersion,
-      "com.typesafe.akka" %% "akka-stream" % akkaVersion
+      "com.typesafe.akka" %% "akka-stream" % akkaVersion,
+      Cinnamon.library.cinnamonAkkaStream,
+      Cinnamon.library.cinnamonPrometheusHttpServer,
+      Cinnamon.library.cinnamonOpenTracingZipkin
     ),
     dockerfile in docker := {
       val artifact: File = assembly.value
@@ -185,6 +191,11 @@ lazy val benchmarks = project
       }
     }
   )
-  .configs(Benchmark)
+  .settings(Seq(
+    cinnamon in run := true,
+    cinnamon in test := true,
+    connectInput in run := true
+  ))
+  .configs(Benchmark, Cinn)
   .settings(inConfig(Benchmark)(Defaults.testSettings): _*)
   .dependsOn(core)

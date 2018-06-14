@@ -18,6 +18,8 @@ import scala.concurrent.{Await, Promise}
 import scala.language.postfixOps
 import scala.util.Success
 
+import com.lightbend.cinnamon.akka.stream.CinnamonAttributes.GraphWithInstrumented
+
 object ReactiveKafkaConsumerBenchmarks extends LazyLogging {
   val streamingTimeout = 30 minutes
   type NonCommitableFixture = ReactiveKafkaConsumerTestFixture[ConsumerRecord[Array[Byte], String]]
@@ -50,7 +52,9 @@ object ReactiveKafkaConsumerBenchmarks extends LazyLogging {
       .map { msg =>
         meter.mark(); msg
       }
-      .runWith(Sink.ignore)
+      .toMat(Sink.ignore)(Keep.right)
+      .instrumented(name = "consumePlain", traceable = true)
+      .run()
     Await.result(future, atMost = streamingTimeout)
     logger.debug("Stream finished")
   }

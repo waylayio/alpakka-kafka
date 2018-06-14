@@ -9,7 +9,7 @@ import akka.kafka.ConsumerMessage.CommittableMessage
 import akka.kafka.ProducerMessage.{Message, Result, Results}
 import akka.kafka.benchmarks.ReactiveKafkaProducerFixtures.ReactiveKafkaProducerTestFixture
 import akka.stream.Materializer
-import akka.stream.scaladsl.{Sink, Source}
+import akka.stream.scaladsl.{Keep, Sink, Source}
 import com.codahale.metrics.Meter
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.kafka.clients.producer.ProducerRecord
@@ -17,6 +17,7 @@ import org.apache.kafka.clients.producer.ProducerRecord
 import scala.concurrent.Await
 import scala.concurrent.duration._
 import scala.language.postfixOps
+import com.lightbend.cinnamon.akka.stream.CinnamonAttributes.GraphWithInstrumented
 
 object ReactiveKafkaProducerBenchmarks extends LazyLogging {
   val streamingTimeout = 30 minutes
@@ -49,7 +50,9 @@ object ReactiveKafkaProducerBenchmarks extends LazyLogging {
           meter.mark()
           other
       }
-      .runWith(Sink.ignore)
+      .toMat(Sink.ignore)(Keep.right)
+      .instrumented(name = "plainFlow", traceable = true)
+      .run()
     Await.result(future, atMost = streamingTimeout)
     logger.info("Stream finished")
   }

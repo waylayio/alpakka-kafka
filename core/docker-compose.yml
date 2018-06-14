@@ -10,7 +10,7 @@ services:
   kafka:
     image: wurstmeister/kafka:1.1.0
     ports:
-      - "9094"
+      - "9094:9094"
     environment:
       HOSTNAME_COMMAND: "docker info | grep ^Name: | cut -d' ' -f 2"
       PORT_COMMAND: "docker port `hostname` 9094 | cut -d: -f 2"

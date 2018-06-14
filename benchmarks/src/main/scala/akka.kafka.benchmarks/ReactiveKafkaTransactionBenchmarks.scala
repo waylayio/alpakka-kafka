@@ -19,6 +19,8 @@ import scala.concurrent.{Await, Promise}
 import scala.language.postfixOps
 import scala.util.Success
 
+import com.lightbend.cinnamon.akka.stream.CinnamonAttributes.GraphWithInstrumented
+
 object ReactiveKafkaTransactionBenchmarks extends LazyLogging {
   val streamingTimeout: FiniteDuration = 30 minutes
   type TransactionFixture = ReactiveKafkaTransactionTestFixture[KTransactionMessage, KProducerMessage, KResult]
@@ -53,6 +55,7 @@ object ReactiveKafkaTransactionBenchmarks extends LazyLogging {
         case other: Results[Key, Val, PassThrough] =>
           promise.complete(Success(()))
       })(Keep.left)
+      .instrumented(name = "sixth", traceable = true)
       .run()
 
     Await.result(promise.future, streamingTimeout)

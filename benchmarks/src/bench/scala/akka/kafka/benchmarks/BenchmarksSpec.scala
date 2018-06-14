@@ -14,7 +14,7 @@ import scala.language.postfixOps
 
 class BenchmarksSpec extends TestKit(ActorSystem("AkkaKafkaBenchmarks")) with FlatSpecLike with BeforeAndAfterAll {
 
-  val kafkaHost = "localhost:9092"
+  val kafkaHost = "localhost:9094"
 
   implicit val mat = ActorMaterializer()
 

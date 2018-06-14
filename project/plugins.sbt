@@ -12,3 +12,7 @@ addSbtPlugin("lt.dvim.paradox" % "sbt-paradox-local" % "0.1")
 // latest version with https://github.com/ehsanyou/sbt-docker-compose/pull/3
 addSbtPlugin("com.github.ehsanyou" % "sbt-docker-compose" % "926a4d83")
 resolvers += Resolver.bintrayIvyRepo("2m", "sbt-plugins")
+
+addSbtPlugin("com.lightbend.cinnamon" % "sbt-cinnamon" % "2.10.0-20180605-26e7708-streams")
+resolvers += Resolver.url("lightbend-commercial",
+  url("https://repo.lightbend.com/commercial-releases"))(Resolver.ivyStylePatterns)
