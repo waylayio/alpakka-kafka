@@ -194,6 +194,41 @@ class ConsumerSettings[K, V] @deprecated("use the factory methods `ConsumerSetti
     val metadataRequestTimeout: FiniteDuration
 ) {
 
+  def this(properties: Map[String, String],
+           keyDeserializerOpt: Option[Deserializer[K]],
+           valueDeserializerOpt: Option[Deserializer[V]],
+           pollInterval: FiniteDuration,
+           pollTimeout: FiniteDuration,
+           stopTimeout: FiniteDuration,
+           closeTimeout: FiniteDuration,
+           commitTimeout: FiniteDuration,
+           commitRefreshInterval: Duration,
+           dispatcher: String,
+           commitTimeWarning: FiniteDuration,
+           waitClosePartition: FiniteDuration,
+           positionTimeout: FiniteDuration,
+           offsetForTimesTimeout: FiniteDuration,
+           metadataRequestTimeout: FiniteDuration) = this(
+    properties,
+    keyDeserializerOpt,
+    valueDeserializerOpt,
+    pollInterval,
+    pollTimeout,
+    stopTimeout,
+    closeTimeout,
+    commitTimeout,
+    wakeupTimeout = 3.seconds,
+    maxWakeups = 10,
+    commitRefreshInterval,
+    dispatcher,
+    commitTimeWarning,
+    wakeupDebug = true,
+    waitClosePartition,
+    positionTimeout,
+    offsetForTimesTimeout,
+    metadataRequestTimeout
+  )
+
   @deprecated("use the factory methods `ConsumerSettings.apply` and `create` instead", "1.0-M1")
   def this(properties: Map[String, String],
            keyDeserializer: Option[Deserializer[K]],

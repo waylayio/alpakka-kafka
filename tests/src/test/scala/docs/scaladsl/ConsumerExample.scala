@@ -113,24 +113,22 @@ class ConsumerExample extends DocsSpecBase(KafkaPorts.ScalaConsumerExamples) {
   }
 
   "Consume messages at-most-once" should "work" in {
+    val totalMessages = 10
     val consumerSettings = createSettings().withGroupId(createGroupId())
     val topic = createTopic()
     // #atMostOnce
-    val (control, result) =
+    val consumedMessages =
       Consumer
         .atMostOnceSource(consumerSettings, Subscriptions.topics(topic))
         .mapAsync(1)(record => business(record.key, record.value()))
-        .map(it => {
-          println(s"Done with $it")
-          it
-        })
-        .toMat(Sink.seq)(Keep.both)
-        .run()
+        .scan(0L)((c, _) => c + 1)
+        .takeWhile(_ < totalMessages, inclusive = true)
+        .runWith(Sink.last)
+
     // #atMostOnce
 
-    awaitProduce(produce(topic, 1 to 10))
-    Await.result(control.shutdown(), 5.seconds) should be(Done)
-    result.futureValue should have size (10)
+    awaitProduce(produce(topic, 1 to totalMessages))
+    consumedMessages.futureValue shouldBe totalMessages
   }
   // #atMostOnce
 
@@ -141,22 +139,23 @@ class ConsumerExample extends DocsSpecBase(KafkaPorts.ScalaConsumerExamples) {
   def business(rec: ConsumerRecord[String, String]): Future[Done] = Future.successful(Done)
 
   "Consume messages at-least-once" should "work" in {
+    val totalMessages = 10
     val consumerSettings = consumerDefaults.withGroupId(createGroupId())
     val topic = createTopic()
     // #atLeastOnce
-    val control =
+    val consumedMessages =
       Consumer
         .committableSource(consumerSettings, Subscriptions.topics(topic))
         .mapAsync(10) { msg =>
           business(msg.record.key, msg.record.value).map(_ => msg.committableOffset)
         }
         .mapAsync(5)(offset => offset.commitScaladsl())
-        .toMat(Sink.seq)(Keep.both)
-        .mapMaterializedValue(DrainingControl.apply)
-        .run()
+        .scan(0L)((c, _) => c + 1)
+        .takeWhile(_ < totalMessages, inclusive = true)
+        .runWith(Sink.last)
     // #atLeastOnce
-    awaitProduce(produce(topic, 1 to 10))
-    Await.result(control.drainAndShutdown(), 5.seconds) should have size (10)
+    awaitProduce(produce(topic, 1 to totalMessages))
+    consumedMessages.futureValue shouldBe totalMessages
   }
   // format: off
   // #atLeastOnce

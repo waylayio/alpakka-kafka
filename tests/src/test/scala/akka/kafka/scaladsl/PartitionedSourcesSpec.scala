@@ -143,7 +143,8 @@ class PartitionedSourcesSpec
       val allTps = (0 until partitions).map(p => new TopicPartition(topic, p))
       val group = createGroupId(1)
       val sourceSettings = consumerDefaults
-        .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest")
+        .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+        .withProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true")
         .withGroupId(group)
 
       var createdSubSources = List.empty[TopicPartition]
@@ -236,7 +237,8 @@ class PartitionedSourcesSpec
       val allTps = (0 until partitions).map(p => new TopicPartition(topic, p))
       val group = createGroupId(1)
       val sourceSettings = consumerDefaults
-        .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest")
+        .withProperty(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest")
+        .withProperty(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true")
         .withGroupId(group)
 
       val rebalanceActor = TestProbe()
