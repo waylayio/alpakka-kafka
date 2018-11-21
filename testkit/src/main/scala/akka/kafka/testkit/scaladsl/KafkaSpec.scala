@@ -68,15 +68,22 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
   implicit val ec: ExecutionContext = system.dispatcher
 
   var testProducer: KProducer[String, String] = _
+  var admin: AdminClient = _
+  var oldAdmin: kafka.admin.AdminClient = _
 
   val InitialMsg =
     "initial msg in topic, required to create the topic before any consumer subscribes to it"
 
-  def setUp(): Unit =
+  def setUp(): Unit = {
     testProducer = producerDefaults.createKafkaProducer()
+    admin = adminClient()
+    oldAdmin = oldAdminClient()
+  }
 
   def cleanUp(): Unit = {
     testProducer.close(60, TimeUnit.SECONDS)
+    admin.close(60, TimeUnit.SECONDS)
+    oldAdmin.close()
     TestKit.shutdownActorSystem(system)
   }
 
@@ -110,10 +117,8 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
    */
   def waitUntilCluster(maxTries: Int = 10, sleepInBetween: FiniteDuration = 100.millis)(
       predicate: DescribeClusterResult => Boolean
-  ): Unit = {
-    val admin = adminClient()
+  ): Unit =
     periodicalCheck("cluster state", maxTries, sleepInBetween)(() => admin.describeCluster())(predicate)
-  }
 
   /**
    * Periodically checks if the given predicate on consumer group state holds.
@@ -124,6 +129,7 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
       groupId: String,
       timeout: Duration = 1.second,
       sleepInBetween: FiniteDuration = 100.millis
+<<<<<<< HEAD
   )(predicate: ConsumerGroupDescription => Boolean): Unit = {
     val admin = adminClient()
     periodicalCheck("consumer group state", (timeout / sleepInBetween).toInt, sleepInBetween)(
@@ -136,8 +142,12 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
           .describedGroups()
           .get(groupId)
           .get(timeout.toMillis, TimeUnit.MILLISECONDS)
+=======
+  )(predicate: kafka.admin.AdminClient#ConsumerGroupSummary => Boolean): Unit =
+    periodicalCheck("consumer group state", (timeout / sleepInBetween).toInt, sleepInBetween)(
+      () => oldAdmin.describeConsumerGroup(groupId, timeout.toMillis)
+>>>>>>> Close admin clients in cleanup
     )(predicate)
-  }
 
   /**
    * Periodically checks if the given predicate on consumer summary holds.
@@ -184,7 +194,7 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
     val newTopics = topicNames.map { topicName =>
       new NewTopic(topicName, 1, 1.toShort).configs(configs)
     }
-    val createResult = adminClient().createTopics(newTopics.asJava)
+    val createResult = admin.createTopics(newTopics.asJava)
     createResult.all().get(10, TimeUnit.SECONDS)
     topicNames
   }
