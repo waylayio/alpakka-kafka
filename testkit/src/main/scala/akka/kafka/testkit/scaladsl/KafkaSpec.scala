@@ -59,7 +59,7 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
 
   // children should setup() and use admin or oldAdmin instead of constructors
   private def adminClient(): AdminClient = super.adminClient()
-  private def oldAdminClient(): kafka.admin.AdminClient = super.oldAdminClient()
+  private def oldAdminClient(): OldAdminClient = super.oldAdminClient()
 
   def this(kafkaPort: Int) = this(kafkaPort, kafkaPort + 1, ActorSystem("Spec"))
 
@@ -73,7 +73,7 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
 
   var testProducer: KProducer[String, String] = _
   var admin: AdminClient = _
-  var oldAdmin: kafka.admin.AdminClient = _
+  var oldAdmin: OldAdminClient = _
 
   val InitialMsg =
     "initial msg in topic, required to create the topic before any consumer subscribes to it"
