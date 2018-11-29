@@ -57,6 +57,10 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
     extends TestKit(actorSystem)
     with KafkaTestKit {
 
+  // children should setup() and use admin or oldAdmin instead of constructors
+  private def adminClient(): AdminClient = super.adminClient()
+  private def oldAdminClient(): kafka.admin.AdminClient = super.oldAdminClient()
+
   def this(kafkaPort: Int) = this(kafkaPort, kafkaPort + 1, ActorSystem("Spec"))
 
   val log: Logger = LoggerFactory.getLogger(getClass)
