@@ -61,8 +61,31 @@ trait KafkaTestKit {
     config
   }
 
-  def adminClient(): AdminClient =
-    AdminClient.create(adminDefaults)
+  private var adminClientVar: AdminClient = _
+  private var oldAdminClientVar: OldAdminClient = _
+
+  def adminClient: AdminClient = {
+    assert(adminClientVar != null,
+           "admin client not created, be sure to call setupAdminClients() and cleanupAdminClients()")
+    adminClientVar
+  }
+
+  /**
+   * Create internal admin clients.
+   * Gives access to `adminClient` and `oldAdminClient`,
+   * be sure to call `cleanUpAdminClients` after the tests are done.
+   */
+  def setUpAdminClients(): Unit = {
+    adminClientVar = AdminClient.create(adminDefaults)
+  }
+
+  /**
+   * Close internal admin client instances.
+   */
+  def cleanUpAdminClients(): Unit = {
+    adminClient.close(60, TimeUnit.SECONDS)
+    adminClientVar = null
+  }
 
   /**
    * Create a topic with given partition number and replication factor.
@@ -72,7 +95,7 @@ trait KafkaTestKit {
   def createTopic(number: Int = 0, partitions: Int = 1, replication: Int = 1): String = {
     val topicName = createTopicName(number)
     val configs = new util.HashMap[String, String]()
-    val createResult = adminClient().createTopics(
+    val createResult = adminClient.createTopics(
       Arrays.asList(new NewTopic(topicName, partitions, replication.toShort).configs(configs))
     )
     createResult.all().get(10, TimeUnit.SECONDS)
