@@ -74,7 +74,7 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
 
   def setUp(): Unit = {
     testProducer = producerDefaults.createKafkaProducer()
-//    setUpAdminClients()
+    setUpAdminClients()
   }
 
   def cleanUp(): Unit = {
