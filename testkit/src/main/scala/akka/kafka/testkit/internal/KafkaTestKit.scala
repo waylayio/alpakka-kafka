@@ -62,7 +62,6 @@ trait KafkaTestKit {
   }
 
   private var adminClientVar: AdminClient = _
-  private var oldAdminClientVar: OldAdminClient = _
 
   def adminClient: AdminClient = {
     assert(adminClientVar != null,
@@ -72,17 +71,16 @@ trait KafkaTestKit {
 
   /**
    * Create internal admin clients.
-   * Gives access to `adminClient` and `oldAdminClient`,
-   * be sure to call `cleanUpAdminClients` after the tests are done.
+   * Gives access to `adminClient`,
+   * be sure to call `cleanUpAdminClient` after the tests are done.
    */
-  def setUpAdminClients(): Unit = {
+  def setUpAdminClient(): Unit =
     adminClientVar = AdminClient.create(adminDefaults)
-  }
 
   /**
    * Close internal admin client instances.
    */
-  def cleanUpAdminClients(): Unit = {
+  def cleanUpAdminClient(): Unit = {
     adminClient.close(60, TimeUnit.SECONDS)
     adminClientVar = null
   }

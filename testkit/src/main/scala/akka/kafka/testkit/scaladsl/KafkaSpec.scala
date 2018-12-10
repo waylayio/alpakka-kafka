@@ -74,12 +74,12 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
 
   def setUp(): Unit = {
     testProducer = producerDefaults.createKafkaProducer()
-    setUpAdminClients()
+    setUpAdminClient()
   }
 
   def cleanUp(): Unit = {
     testProducer.close(60, TimeUnit.SECONDS)
-    cleanUpAdminClients()
+    cleanUpAdminClient()
     TestKit.shutdownActorSystem(system)
   }
 
@@ -126,7 +126,7 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
       timeout: Duration = 1.second,
       sleepInBetween: FiniteDuration = 100.millis
   )(predicate: ConsumerGroupDescription => Boolean): Unit = {
-    val admin = adminClient()
+    val admin = adminClient
     periodicalCheck("consumer group state", (timeout / sleepInBetween).toInt, sleepInBetween)(
       () =>
         admin
@@ -137,8 +137,8 @@ abstract class KafkaSpec(val kafkaPort: Int, val zooKeeperPort: Int, actorSystem
           .describedGroups()
           .get(groupId)
           .get(timeout.toMillis, TimeUnit.MILLISECONDS)
-      () => oldAdmin.describeConsumerGroup(groupId, timeout.toMillis)
     )(predicate)
+  }
 
   /**
    * Periodically checks if the given predicate on consumer summary holds.
