@@ -46,11 +46,14 @@ import scala.concurrent.{Future, Promise}
     }
 
     subscription match {
-      case sub @ TopicSubscription(topics, _) =>
-        consumerActor.tell(KafkaConsumerActor.Internal.Subscribe(topics, rebalanceListener(sub)), sourceActor.ref)
-      case sub @ TopicSubscriptionPattern(topics, _) =>
-        consumerActor.tell(KafkaConsumerActor.Internal.SubscribePattern(topics, rebalanceListener(sub)),
+      case sub @ TopicSubscription(topics, _, partitionAssignment) =>
+        consumerActor.tell(KafkaConsumerActor.Internal.Subscribe(topics, rebalanceListener(sub), partitionAssignment),
                            sourceActor.ref)
+      case sub @ TopicSubscriptionPattern(topics, _, partitionAssignment) =>
+        consumerActor.tell(
+          KafkaConsumerActor.Internal.SubscribePattern(topics, rebalanceListener(sub), partitionAssignment),
+          sourceActor.ref
+        )
       case s: ManualSubscription => configureManualSubscription(s)
     }
 

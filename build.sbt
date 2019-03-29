@@ -215,11 +215,21 @@ lazy val tests = project
         "org.slf4j" % "jul-to-slf4j" % slf4jVersion % Test,
         "org.mockito" % "mockito-core" % "2.24.5" % Test
       ) ++ {
-        if (scalaBinaryVersion.value == "2.13") Seq()
-        else
-          Seq(
-            "io.github.embeddedkafka" %% "embedded-kafka-schema-registry" % "5.2.1" % Test exclude ("log4j", "log4j") exclude ("org.slf4j", "slf4j-log4j12")
-          )
+        scalaBinaryVersion.value match {
+          case "2.13" =>
+            Seq(
+              "com.typesafe.akka" %% "akka-actor-typed" % akkaVersion % Test
+            )
+          case "2.12" =>
+            Seq(
+              "com.typesafe.akka" %% "akka-actor-typed" % akkaVersion % Test,
+              "io.github.embeddedkafka" %% "embedded-kafka-schema-registry" % "5.2.1" % Test exclude ("log4j", "log4j") exclude ("org.slf4j", "slf4j-log4j12")
+            )
+          case "2.11" =>
+            Seq(
+              "io.github.embeddedkafka" %% "embedded-kafka-schema-registry" % "5.2.1" % Test exclude ("log4j", "log4j") exclude ("org.slf4j", "slf4j-log4j12")
+            )
+        }
       } ++
       Seq( // integration test dependencies
         "com.typesafe.akka" %% "akka-stream-testkit" % akkaVersion % IntegrationTest,
@@ -253,6 +263,9 @@ lazy val tests = project
         "ProducerExampleTest.java" ||
         "SerializationTest.java" ||
         "TransactionsExampleTest.java"
+      } else if (scalaBinaryVersion.value == "2.11") {
+        HiddenFileFilter ||
+        "PartitionAssignmentHandlerSpec.scala"
       } else (Test / unmanagedSources / excludeFilter).value
     },
     kafkaScale := 3,

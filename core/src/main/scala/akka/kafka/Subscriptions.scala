@@ -6,6 +6,7 @@
 package akka.kafka
 
 import akka.actor.ActorRef
+import akka.kafka.Subscriptions.PartitionAssignmentHandler
 import org.apache.kafka.common.TopicPartition
 
 import scala.annotation.varargs
@@ -41,6 +42,8 @@ sealed trait AutoSubscription extends Subscription {
   /** Configure this actor ref to receive [[akka.kafka.ConsumerRebalanceEvent]] signals */
   def withRebalanceListener(ref: ActorRef): AutoSubscription
 
+  def withPartitionAssignmentHandler(rebalanceHandler: PartitionAssignmentHandler): AutoSubscription
+
   override protected def renderListener: String =
     rebalanceListener match {
       case Some(ref) => s" rebalanceListener $ref"
@@ -56,21 +59,68 @@ final case class TopicPartitionsRevoked(sub: Subscription, topicPartitions: Set[
 
 object Subscriptions {
 
+  // TODO Java API support
+  /**
+   * Allows to execute user code when Kafka rebalances partitions between consumers, or an Alpakka Kafka consumer is stopped.
+   * Use with care: These callbacks are called synchronously on the same thread Kafka's `poll()` is called.
+   * A warning will be logged if a callback takes longer than the configured `partition-handler-warning`.
+   *
+   * This extends the [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener ConsumerRebalanceListener]] with
+   * an `onStop` callback.
+   */
+  trait PartitionAssignmentHandler {
+
+    /**
+     * See [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener#onPartitionsRevoked]]
+     *
+     * @param revokedTps The list of partitions that were assigned to the consumer on the last rebalance
+     * @param consumer A restricted version of the internally used [[org.apache.kafka.clients.consumer.Consumer Consumer]]
+     */
+    def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {}
+
+    /**
+     * See [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener#onPartitionsAssigned]]
+     *
+     * @param assignedTps The list of partitions that are now assigned to the consumer (may include partitions previously assigned to the consumer)
+     * @param consumer A restricted version of the internally used [[org.apache.kafka.clients.consumer.Consumer Consumer]]
+     */
+    def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {}
+
+    /**
+     * Called before a consumer is closed.
+     * See [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener#onPartitionsRevoked]]
+     *
+     * @param revokedTps The list of partitions that are currently assigned to the consumer
+     * @param consumer A restricted version of the internally used [[org.apache.kafka.clients.consumer.Consumer Consumer]]
+     */
+    def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = onRevoke(revokedTps, consumer)
+  }
+
+  private object EmptyPartitionAssignmentHandler extends PartitionAssignmentHandler
+
   /** INTERNAL API */
   @akka.annotation.InternalApi
-  private[kafka] final case class TopicSubscription(tps: Set[String], rebalanceListener: Option[ActorRef])
+  private[kafka] final case class TopicSubscription(tps: Set[String],
+                                                    rebalanceListener: Option[ActorRef],
+                                                    partitionAssignmentHandler: PartitionAssignmentHandler)
       extends AutoSubscription {
     def withRebalanceListener(ref: ActorRef): TopicSubscription =
-      TopicSubscription(tps, Some(ref))
+      TopicSubscription(tps, Some(ref), partitionAssignmentHandler)
+    def withPartitionAssignmentHandler(partitionAssignmentHandler: PartitionAssignmentHandler): TopicSubscription =
+      TopicSubscription(tps, rebalanceListener, partitionAssignmentHandler)
     def renderStageAttribute: String = s"${tps.mkString(" ")}$renderListener"
   }
 
   /** INTERNAL API */
   @akka.annotation.InternalApi
-  private[kafka] final case class TopicSubscriptionPattern(pattern: String, rebalanceListener: Option[ActorRef])
+  private[kafka] final case class TopicSubscriptionPattern(pattern: String,
+                                                           rebalanceListener: Option[ActorRef],
+                                                           rebalanceHandler: PartitionAssignmentHandler)
       extends AutoSubscription {
     def withRebalanceListener(ref: ActorRef): TopicSubscriptionPattern =
-      TopicSubscriptionPattern(pattern, Some(ref))
+      TopicSubscriptionPattern(pattern, Some(ref), rebalanceHandler)
+    def withPartitionAssignmentHandler(rebalanceHandler: PartitionAssignmentHandler): TopicSubscriptionPattern =
+      TopicSubscriptionPattern(pattern, rebalanceListener, rebalanceHandler)
     def renderStageAttribute: String = s"pattern $pattern$renderListener"
   }
 
@@ -99,7 +149,8 @@ object Subscriptions {
   }
 
   /** Creates subscription for given set of topics */
-  def topics(ts: Set[String]): AutoSubscription = TopicSubscription(ts, None)
+  def topics(ts: Set[String]): AutoSubscription =
+    TopicSubscription(ts, rebalanceListener = None, EmptyPartitionAssignmentHandler)
 
   /**
    * JAVA API
@@ -117,7 +168,8 @@ object Subscriptions {
   /**
    * Creates subscription for given topics pattern
    */
-  def topicPattern(pattern: String): AutoSubscription = TopicSubscriptionPattern(pattern, None)
+  def topicPattern(pattern: String): AutoSubscription =
+    TopicSubscriptionPattern(pattern, rebalanceListener = None, EmptyPartitionAssignmentHandler)
 
   /**
    * Manually assign given topics and partitions

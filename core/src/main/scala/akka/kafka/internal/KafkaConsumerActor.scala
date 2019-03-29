@@ -50,12 +50,16 @@ import scala.util.control.NonFatal
     final case class AssignWithOffset(tps: Map[TopicPartition, Long]) extends NoSerializationVerificationNeeded
     final case class AssignOffsetsForTimes(timestampsToSearch: Map[TopicPartition, Long])
         extends NoSerializationVerificationNeeded
-    final case class Subscribe(topics: Set[String], listener: ListenerCallbacks)
+    final case class Subscribe(topics: Set[String],
+                               listener: ListenerCallbacks,
+                               rebalanceHandler: Subscriptions.PartitionAssignmentHandler)
         extends SubscriptionRequest
         with NoSerializationVerificationNeeded
     case object RequestMetrics extends NoSerializationVerificationNeeded
     // Could be optimized to contain a Pattern as it used during reconciliation now, tho only in exceptional circumstances
-    final case class SubscribePattern(pattern: String, listener: ListenerCallbacks)
+    final case class SubscribePattern(pattern: String,
+                                      listener: ListenerCallbacks,
+                                      rebalanceHandler: Subscriptions.PartitionAssignmentHandler)
         extends SubscriptionRequest
         with NoSerializationVerificationNeeded
     final case class Seek(tps: Map[TopicPartition, Long]) extends NoSerializationVerificationNeeded
@@ -230,7 +234,7 @@ import scala.util.control.NonFatal
   /** Limits the blocking on offsetForTimes */
   private val offsetForTimesTimeout = settings.getOffsetForTimesTimeout
 
-  /** Limits the blocking on position in [[WrappedAutoPausedListener]] */
+  /** Limits the blocking on position in [[RebalanceListener]] */
   private val positionTimeout = settings.getPositionTimeout
 
   private var requests = Map.empty[ActorRef, RequestMessages]
@@ -261,6 +265,7 @@ import scala.util.control.NonFatal
   private var rebalanceCommitSenders = Vector.empty[ActorRef]
 
   private var delayedPollInFlight = false
+  private var partitionAssignmentHandler: Option[RebalanceListener] = None
 
   def receive: Receive = LoggingReceive {
     case Assign(assignedTps) =>
@@ -365,10 +370,14 @@ import scala.util.control.NonFatal
   def handleSubscription(subscription: SubscriptionRequest): Unit =
     try {
       subscription match {
-        case Subscribe(topics, listener) =>
-          consumer.subscribe(topics.toList.asJava, new WrappedAutoPausedListener(listener))
-        case SubscribePattern(pattern, listener) =>
-          consumer.subscribe(Pattern.compile(pattern), new WrappedAutoPausedListener(listener))
+        case Subscribe(topics, listener, rebalanceHandler) =>
+          val callback = new RebalanceListener(listener, rebalanceHandler)
+          partitionAssignmentHandler = Some(callback)
+          consumer.subscribe(topics.toList.asJava, callback)
+        case SubscribePattern(pattern, listener, rebalanceHandler) =>
+          val callback = new RebalanceListener(listener, rebalanceHandler)
+          partitionAssignmentHandler = Some(callback)
+          consumer.subscribe(Pattern.compile(pattern), callback)
       }
 
       scheduleFirstPollTask()
@@ -418,6 +427,7 @@ import scala.util.control.NonFatal
       case (ref, req) =>
         ref ! Messages(req.requestId, Iterator.empty)
     }
+    partitionAssignmentHandler.foreach(_.postStop())
     consumer.close(settings.getCloseTimeout)
     super.postStop()
   }
@@ -643,23 +653,50 @@ import scala.util.control.NonFatal
    * So these methods are always called on the same thread as the actor and we're safe to
    * touch internal state.
    */
-  private final class WrappedAutoPausedListener(listener: ListenerCallbacks)
-      extends ConsumerRebalanceListener
-      with NoSerializationVerificationNeeded {
+  private[KafkaConsumerActor] final class RebalanceListener(
+      listener: ListenerCallbacks,
+      partitionAssignmentHandler: Subscriptions.PartitionAssignmentHandler
+  ) extends ConsumerRebalanceListener {
+
+    private val restrictedConsumer = new RestrictedConsumer(consumer, settings.partitionHandlerWarning.*(0.95d).asJava)
+    private val warningDuration = settings.partitionHandlerWarning.toNanos
 
     override def onPartitionsAssigned(partitions: java.util.Collection[TopicPartition]): Unit = {
       consumer.pause(partitions)
       val tps = partitions.asScala.toSet
       commitRefreshing.assignedPositions(tps, consumer, positionTimeout)
+      val startTime = System.nanoTime()
+      partitionAssignmentHandler.onAssign(tps, restrictedConsumer)
+      checkDuration(startTime, "onAssign")
       listener.onAssign(tps)
       rebalanceInProgress = false
     }
 
     override def onPartitionsRevoked(partitions: java.util.Collection[TopicPartition]): Unit = {
       val revokedTps = partitions.asScala.toSet
+      val startTime = System.nanoTime()
+      partitionAssignmentHandler.onRevoke(revokedTps, restrictedConsumer)
+      checkDuration(startTime, "onRevoke")
       listener.onRevoke(revokedTps)
       commitRefreshing.revoke(revokedTps)
       rebalanceInProgress = true
+    }
+
+    def postStop(): Unit = {
+      val currentTps = consumer.assignment()
+      consumer.pause(currentTps)
+      val startTime = System.nanoTime()
+      partitionAssignmentHandler.onStop(currentTps.asScala.toSet, restrictedConsumer)
+      checkDuration(startTime, "onStop")
+    }
+
+    private def checkDuration(startTime: Long, method: String): Unit = {
+      val duration = System.nanoTime() - startTime
+      if (duration > warningDuration) {
+        log.warning("Partition assignment handler `{}` took longer than `partition-handler-warning`: {} ms",
+                    method,
+                    duration / 1000000L)
+      }
     }
   }
 
