@@ -209,6 +209,8 @@ class PartitionAssignmentHandlerSpec
       val subscription1 = Subscriptions.topics(topic).withPartitionAssignmentHandler(commitOnRevoke(offsetStoreActor))
       val subscription2 = Subscriptions.topics(topic).withPartitionAssignmentHandler(commitOnRevoke(offsetStoreActor))
 
+      // TODO to make this useful, there must be the possibility for a scheduled commit
+
       val control1 = Consumer
         .plainSource(consumerSettings, subscription1)
         .take(initialConsume.toLong)

@@ -8,11 +8,27 @@ package akka.kafka.internal
 import akka.actor.{ActorRef, ExtendedActorSystem, Terminated}
 import akka.annotation.InternalApi
 import akka.kafka.Subscriptions._
-import akka.kafka.{AutoSubscription, ConsumerSettings, ManualSubscription, Subscription}
+import akka.kafka.{AutoSubscription, ConsumerSettings, ManualSubscription, RestrictedConsumer, Subscription}
 import akka.stream.{ActorMaterializerHelper, SourceShape}
 import org.apache.kafka.common.TopicPartition
 
 import scala.concurrent.{Future, Promise}
+
+class PartitionAssignmentChain(handler1: PartitionAssignmentHandler, handler2: PartitionAssignmentHandler)
+    extends PartitionAssignmentHandler {
+  override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+    handler1.onRevoke(revokedTps, consumer)
+    handler2.onRevoke(revokedTps, consumer)
+  }
+  override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+    handler1.onAssign(assignedTps, consumer)
+    handler2.onAssign(assignedTps, consumer)
+  }
+  override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+    handler1.onStop(revokedTps, consumer)
+    handler2.onStop(revokedTps, consumer)
+  }
+}
 
 /**
  * Internal API.
@@ -38,17 +54,24 @@ import scala.concurrent.{Future, Promise}
 
       val revokedCB = getAsyncCallback[Set[TopicPartition]](partitionRevokedHandler)
 
-      KafkaConsumerActor.ListenerCallbacks(autoSubscription,
-                                           sourceActor.ref,
-                                           assignedCB,
-                                           revokedCB,
-                                           blockingRevokedHandler)
+      KafkaConsumerActor.ListenerCallbacks(autoSubscription, sourceActor.ref, assignedCB, revokedCB)
+    }
+
+    val blockingRevokedCall = new PartitionAssignmentHandler {
+      override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit =
+        blockingRevokedHandler(revokedTps)
     }
 
     subscription match {
       case sub @ TopicSubscription(topics, _, partitionAssignment) =>
-        consumerActor.tell(KafkaConsumerActor.Internal.Subscribe(topics, rebalanceListener(sub), partitionAssignment),
-                           sourceActor.ref)
+        consumerActor.tell(
+          KafkaConsumerActor.Internal.Subscribe(
+            topics,
+            rebalanceListener(sub),
+            new PartitionAssignmentChain(partitionAssignment, blockingRevokedCall)
+          ),
+          sourceActor.ref
+        )
       case sub @ TopicSubscriptionPattern(topics, _, partitionAssignment) =>
         consumerActor.tell(
           KafkaConsumerActor.Internal.SubscribePattern(topics, rebalanceListener(sub), partitionAssignment),

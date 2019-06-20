@@ -65,7 +65,7 @@ object Subscriptions {
    * Use with care: These callbacks are called synchronously on the same thread Kafka's `poll()` is called.
    * A warning will be logged if a callback takes longer than the configured `partition-handler-warning`.
    *
-   * This extends the [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener ConsumerRebalanceListener]] with
+   * This complements the methods of the [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener ConsumerRebalanceListener]] with
    * an `onStop` callback.
    */
   trait PartitionAssignmentHandler {
@@ -93,7 +93,7 @@ object Subscriptions {
      * @param revokedTps The list of partitions that are currently assigned to the consumer
      * @param consumer A restricted version of the internally used [[org.apache.kafka.clients.consumer.Consumer Consumer]]
      */
-    def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = onRevoke(revokedTps, consumer)
+    def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {}
   }
 
   private object EmptyPartitionAssignmentHandler extends PartitionAssignmentHandler
