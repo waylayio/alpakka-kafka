@@ -5,10 +5,8 @@
 
 package akka.kafka.scaladsl
 
-import akka.actor.typed.scaladsl.AskPattern._
-import akka.actor.typed.scaladsl.Behaviors
-import akka.actor.typed.scaladsl.adapter._
-import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
+import akka.actor.{Actor, ActorRef, Props}
+import akka.pattern.ask
 import akka.kafka._
 import akka.kafka.scaladsl.Consumer.DrainingControl
 import akka.kafka.scaladsl.OffsetStorage.{RequestOffset, StorePositions, TpsOffsets}
@@ -34,45 +32,45 @@ object OffsetStorage {
   final case class TpsOffsets(offsets: TpOffsetMap)
 
   sealed trait OffsetMessages
-  final case class Clear(replyTo: ActorRef[Done]) extends OffsetMessages
-  final case class StoreHandledOffset(tp: TopicPartition, offset: Long, replyTo: ActorRef[Done]) extends OffsetMessages
-  final case class StorePositions(offsets: TpOffsetMap, replyTo: ActorRef[Done]) extends OffsetMessages
-  final case class RequestOffset(tps: Set[TopicPartition], actorRef: ActorRef[TpsOffsets]) extends OffsetMessages
-  final case class RequestAll(actorRef: ActorRef[TpsOffsets]) extends OffsetMessages
+  final case class Clear() extends OffsetMessages
+  final case class StoreHandledOffset(tp: TopicPartition, offset: Long) extends OffsetMessages
+  final case class StorePositions(offsets: TpOffsetMap) extends OffsetMessages
+  final case class RequestOffset(tps: Set[TopicPartition]) extends OffsetMessages
+  final case class RequestAll() extends OffsetMessages
 
-  val behavior: Behavior[OffsetMessages] = store(Map.empty)
+  class OffsetStorageActor extends Actor {
 
-  private def store(current: TpOffsetMap): Behavior[OffsetMessages] =
-    Behaviors.receiveMessage[OffsetMessages] {
-      case StorePositions(offsets, replyTo) =>
+    def receive: Receive = store(Map.empty)
+
+    private def store(current: TpOffsetMap): Receive = {
+      case StorePositions(offsets) =>
         println(s"storing $offsets")
-        replyTo ! Done
-        store(current ++ offsets)
+        sender() ! Done
+        context.become(store(current ++ offsets))
 
-      case StoreHandledOffset(tp, offset, replyTo) =>
+      case StoreHandledOffset(tp, offset) =>
         println(s"storing $tp -> ${offset + 1}")
-        replyTo ! Done
-        store(current.updated(tp, offset + 1L))
+        sender() ! Done
+        context.become(store(current.updated(tp, offset + 1L)))
 
-      case RequestOffset(tps, replyTo) =>
+      case RequestOffset(tps) =>
         val tpsWithOffsets = tps
           .filter(current.contains)
           .map { tp =>
             (tp, current(tp))
           }
           .toMap
-        replyTo ! TpsOffsets(tpsWithOffsets)
-        Behaviors.same
+        sender() ! TpsOffsets(tpsWithOffsets)
 
-      case RequestAll(replyTo) =>
-        replyTo ! TpsOffsets(current)
-        Behaviors.same
+      case RequestAll() =>
+        sender() ! TpsOffsets(current)
 
-      case Clear(replyTo) =>
-        replyTo ! Done
-        store(Map.empty)
+      case Clear() =>
+        sender() ! Done
+        context.become(store(Map.empty))
     }
 
+  }
 }
 
 class PartitionAssignmentHandlerSpec
@@ -95,32 +93,28 @@ class PartitionAssignmentHandlerSpec
   final val Numbers1 = (1 to 20).map(_.toString + "-p1")
   final val partition1 = 1
 
-  val typedSystem: ActorSystem[Nothing] = system.toTyped
-
   val positionTimeout: java.time.Duration = 10.seconds.asJava
 
   val businessLogic: Flow[ConsumerRecord[String, String], ConsumerRecord[String, String], NotUsed] =
     Flow[ConsumerRecord[String, String]]
 
-  def storeLastSeenOffset(offsetStoreActor: ActorRef[OffsetStorage.OffsetMessages], tp: TopicPartition, offset: Long) =
-    offsetStoreActor
-      .?[Done](replyTo => OffsetStorage.StoreHandledOffset(tp, offset, replyTo))
+  def storeLastSeenOffset(offsetStoreActor: ActorRef, tp: TopicPartition, offset: Long) =
+    offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset)
 
   def seekOnAssign(
-      offsetStoreActor: ActorRef[OffsetStorage.OffsetMessages]
+      offsetStoreActor: ActorRef
   ): Subscriptions.PartitionAssignmentHandler =
     new Subscriptions.PartitionAssignmentHandler() {
-      import akka.actor.typed.scaladsl.AskPattern._
       implicit val timeout: Timeout = 3.seconds
 
       override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
         val offsets = revokedTps.map(tp => tp -> consumer.position(tp)).toMap
         // TODO fire and forget?
-        val eventualDone = offsetStoreActor.?[Done](replyTo => StorePositions(offsets, replyTo))
+        val eventualDone = offsetStoreActor ? StorePositions(offsets)
       }
 
       override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
-        val eventualUnit = offsetStoreActor.?[TpsOffsets](replyTo => RequestOffset(assignedTps, replyTo))
+        val eventualUnit = (offsetStoreActor ? RequestOffset(assignedTps)).mapTo[TpsOffsets]
         val tpsOffsets = Await.result(eventualUnit, 30.seconds)
         println(s"onAssign($assignedTps) got $tpsOffsets")
 
@@ -144,8 +138,8 @@ class PartitionAssignmentHandlerSpec
       val consumerSettings = consumerDefaults
         .withGroupId(groupId)
 
-      val offsetStoreActor: ActorRef[OffsetStorage.OffsetMessages] =
-        system.spawn(OffsetStorage.behavior, "offsetStorage")
+      val offsetStoreActor: ActorRef =
+        system.actorOf(Props(new OffsetStorage.OffsetStorageActor()), "offsetStorage")
 
       val subscription =
         Subscriptions.topics(topic).withPartitionAssignmentHandler(seekOnAssign(offsetStoreActor))
@@ -168,29 +162,28 @@ class PartitionAssignmentHandlerSpec
 
       control.drainAndShutdown().futureValue should contain theSameElementsAs (Numbers0 ++ Numbers1)
 
-      val map = offsetStoreActor.?(OffsetStorage.RequestAll).futureValue
+      val map = (offsetStoreActor ? OffsetStorage.RequestAll()).mapTo[TpsOffsets].futureValue
 
       map.offsets.get(new TopicPartition(topic, partition0)).value shouldBe Numbers0.size.toLong
       map.offsets.get(new TopicPartition(topic, partition1)).value shouldBe Numbers1.size.toLong
 
-      offsetStoreActor.?(OffsetStorage.Clear).futureValue shouldBe Done
+      (offsetStoreActor ? OffsetStorage.Clear()).mapTo[Done].futureValue shouldBe Done
     }
   }
 
   "Explicit committing" should {
 
     def commitOnRevoke(
-        offsetStoreActor: ActorRef[OffsetStorage.OffsetMessages]
+        offsetStoreActor: ActorRef
     ): Subscriptions.PartitionAssignmentHandler =
       new Subscriptions.PartitionAssignmentHandler() {
-        import akka.actor.typed.scaladsl.AskPattern._
         implicit val timeout: Timeout = 3.seconds
 
         override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
 
         override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
           println(s"onRevoke($revokedTps)")
-          val eventualUnit = offsetStoreActor.?[TpsOffsets](replyTo => RequestOffset(revokedTps, replyTo))
+          val eventualUnit = (offsetStoreActor ? RequestOffset(revokedTps)).mapTo[TpsOffsets]
           val tpsOffsets = Await.result(eventualUnit, 30.seconds)
           println(s"onRevoke($revokedTps) got $tpsOffsets")
 
@@ -210,8 +203,8 @@ class PartitionAssignmentHandlerSpec
       val consumerSettings = consumerDefaults
         .withGroupId(groupId)
 
-      val offsetStoreActor: ActorRef[OffsetStorage.OffsetMessages] =
-        system.spawn(OffsetStorage.behavior, "offsetStorage1")
+      val offsetStoreActor: ActorRef =
+        system.actorOf(Props(new OffsetStorage.OffsetStorageActor()), "offsetStorage1")
       val subscription1 = Subscriptions.topics(topic).withPartitionAssignmentHandler(commitOnRevoke(offsetStoreActor))
       val subscription2 = Subscriptions.topics(topic).withPartitionAssignmentHandler(commitOnRevoke(offsetStoreActor))
 
@@ -234,7 +227,7 @@ class PartitionAssignmentHandlerSpec
 
       control1.streamCompletion.futureValue should have size 5
       sleep(3.seconds, "to make it spin")
-      val offsets1_1 = offsetStoreActor.?(OffsetStorage.RequestAll).futureValue.offsets
+      val offsets1_1 = (offsetStoreActor ? OffsetStorage.RequestAll()).mapTo[TpsOffsets].futureValue.offsets
       // either partition is read first and we took 5 elements
       val positionP0: Long = offsets1_1.getOrElse(new TopicPartition(topic, partition0), -1L)
       val positionP1: Long = offsets1_1.getOrElse(new TopicPartition(topic, partition1), -1L)
@@ -267,7 +260,7 @@ class PartitionAssignmentHandlerSpec
 
       received should contain theSameElementsAs expextInConsumer2
 
-      val offsets2 = offsetStoreActor.?(OffsetStorage.RequestAll).futureValue.offsets
+      val offsets2 = (offsetStoreActor ? OffsetStorage.RequestAll()).mapTo[TpsOffsets].futureValue.offsets
       offsets2.get(new TopicPartition(topic, partition0)).value shouldBe Numbers0.size
       offsets2.get(new TopicPartition(topic, partition1)).value shouldBe Numbers1.size
     }

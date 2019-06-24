@@ -217,12 +217,9 @@ lazy val tests = project
       ) ++ {
         scalaBinaryVersion.value match {
           case "2.13" =>
-            Seq(
-              "com.typesafe.akka" %% "akka-actor-typed" % akkaVersion % Test
-            )
+            Seq()
           case "2.12" =>
             Seq(
-              "com.typesafe.akka" %% "akka-actor-typed" % akkaVersion % Test,
               "io.github.embeddedkafka" %% "embedded-kafka-schema-registry" % "5.2.1" % Test exclude ("log4j", "log4j") exclude ("org.slf4j", "slf4j-log4j12")
             )
           case "2.11" =>
@@ -264,9 +261,6 @@ lazy val tests = project
         "ProducerExampleTest.java" ||
         "SerializationTest.java" ||
         "TransactionsExampleTest.java"
-      } else if (scalaBinaryVersion.value == "2.11") {
-        HiddenFileFilter ||
-        "PartitionAssignmentHandlerSpec.scala"
       } else (Test / unmanagedSources / excludeFilter).value
     },
     kafkaScale := 3,
