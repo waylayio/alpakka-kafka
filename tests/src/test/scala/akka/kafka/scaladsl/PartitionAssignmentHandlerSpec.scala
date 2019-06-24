@@ -198,7 +198,8 @@ class PartitionAssignmentHandlerSpec
           consumer.commitSync(asMap.asJava)
         }
 
-        override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
+        override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit =
+          onRevoke(revokedTps, consumer)
       }
 
     "allow for less traffic to Kafka?" in assertAllStagesStopped {
@@ -253,15 +254,18 @@ class PartitionAssignmentHandlerSpec
 
       sleep(5.seconds, "to make it spin")
 
+      val received = control2
+        .drainAndShutdown()
+        .futureValue
+
       val expextInConsumer2 =
         if (positionP0 > -1) {
           Numbers0.drop(initialConsume) ++ Numbers1
         } else {
           Numbers0 ++ Numbers1.drop(initialConsume)
         }
-      control2
-        .drainAndShutdown()
-        .futureValue should contain theSameElementsAs expextInConsumer2
+
+      received should contain theSameElementsAs expextInConsumer2
 
       val offsets2 = offsetStoreActor.?(OffsetStorage.RequestAll).futureValue.offsets
       offsets2.get(new TopicPartition(topic, partition0)).value shouldBe Numbers0.size

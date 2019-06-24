@@ -8,7 +8,14 @@ package akka.kafka.internal
 import akka.actor.{ActorRef, ExtendedActorSystem, Terminated}
 import akka.annotation.InternalApi
 import akka.kafka.Subscriptions._
-import akka.kafka.{AutoSubscription, ConsumerSettings, ManualSubscription, RestrictedConsumer, Subscription}
+import akka.kafka.{
+  AutoSubscription,
+  ConsumerSettings,
+  ManualSubscription,
+  RestrictedConsumer,
+  Subscription,
+  Subscriptions
+}
 import akka.stream.{ActorMaterializerHelper, SourceShape}
 import org.apache.kafka.common.TopicPartition
 
@@ -49,12 +56,15 @@ class PartitionAssignmentChain(handler1: PartitionAssignmentHandler, handler2: P
 
   final def configureSubscription(): Unit = {
 
-    def rebalanceListener(autoSubscription: AutoSubscription): KafkaConsumerActor.ListenerCallbacks = {
+    def rebalanceListener(autoSubscription: AutoSubscription): Subscriptions.PartitionAssignmentHandler = {
       val assignedCB = getAsyncCallback[Set[TopicPartition]](partitionAssignedHandler)
 
       val revokedCB = getAsyncCallback[Set[TopicPartition]](partitionRevokedHandler)
 
-      KafkaConsumerActor.ListenerCallbacks(autoSubscription, sourceActor.ref, assignedCB, revokedCB)
+      new KafkaConsumerActor.PartitionedAssignmentAsyncCallbacks(autoSubscription,
+                                                                 sourceActor.ref,
+                                                                 assignedCB,
+                                                                 revokedCB)
     }
 
     val blockingRevokedCall = new PartitionAssignmentHandler {
@@ -69,14 +79,15 @@ class PartitionAssignmentChain(handler1: PartitionAssignmentHandler, handler2: P
         consumerActor.tell(
           KafkaConsumerActor.Internal.Subscribe(
             topics,
-            rebalanceListener(sub),
-            new PartitionAssignmentChain(partitionAssignment, blockingRevokedCall)
+            new PartitionAssignmentChain(rebalanceListener(sub),
+                                         new PartitionAssignmentChain(partitionAssignment, blockingRevokedCall))
           ),
           sourceActor.ref
         )
       case sub @ TopicSubscriptionPattern(topics, _, partitionAssignment) =>
         consumerActor.tell(
-          KafkaConsumerActor.Internal.SubscribePattern(topics, rebalanceListener(sub), partitionAssignment),
+          KafkaConsumerActor.Internal
+            .SubscribePattern(topics, new PartitionAssignmentChain(rebalanceListener(sub), partitionAssignment)),
           sourceActor.ref
         )
       case s: ManualSubscription => configureManualSubscription(s)

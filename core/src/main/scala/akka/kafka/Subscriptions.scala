@@ -39,15 +39,19 @@ sealed trait AutoSubscription extends Subscription {
   /** ActorRef which is to receive [[akka.kafka.ConsumerRebalanceEvent]] signals when rebalancing happens */
   def rebalanceListener: Option[ActorRef]
 
+  /** TODO */
+  def partitionAssignmentHandler: PartitionAssignmentHandler
+
   /** Configure this actor ref to receive [[akka.kafka.ConsumerRebalanceEvent]] signals */
   def withRebalanceListener(ref: ActorRef): AutoSubscription
 
-  def withPartitionAssignmentHandler(rebalanceHandler: PartitionAssignmentHandler): AutoSubscription
+  /** TODO */
+  def withPartitionAssignmentHandler(value: PartitionAssignmentHandler): AutoSubscription
 
   override protected def renderListener: String =
     rebalanceListener match {
-      case Some(ref) => s" rebalanceListener $ref"
-      case None => ""
+      case Some(ref) => s" rebalanceListener $ref ${partitionAssignmentHandler.getClass.getSimpleName}"
+      case None => s" ${partitionAssignmentHandler.getClass.getSimpleName}"
     }
 }
 
@@ -109,9 +113,9 @@ object Subscriptions {
                                                     partitionAssignmentHandler: PartitionAssignmentHandler)
       extends AutoSubscription {
     def withRebalanceListener(ref: ActorRef): TopicSubscription =
-      TopicSubscription(tps, Some(ref), partitionAssignmentHandler)
-    def withPartitionAssignmentHandler(partitionAssignmentHandler: PartitionAssignmentHandler): TopicSubscription =
-      TopicSubscription(tps, rebalanceListener, partitionAssignmentHandler)
+      copy(rebalanceListener = Some(ref))
+    def withPartitionAssignmentHandler(value: PartitionAssignmentHandler): TopicSubscription =
+      copy(partitionAssignmentHandler = value)
     def renderStageAttribute: String = s"${tps.mkString(" ")}$renderListener"
   }
 
@@ -119,12 +123,12 @@ object Subscriptions {
   @akka.annotation.InternalApi
   private[kafka] final case class TopicSubscriptionPattern(pattern: String,
                                                            rebalanceListener: Option[ActorRef],
-                                                           rebalanceHandler: PartitionAssignmentHandler)
+                                                           partitionAssignmentHandler: PartitionAssignmentHandler)
       extends AutoSubscription {
     def withRebalanceListener(ref: ActorRef): TopicSubscriptionPattern =
-      TopicSubscriptionPattern(pattern, Some(ref), rebalanceHandler)
-    def withPartitionAssignmentHandler(rebalanceHandler: PartitionAssignmentHandler): TopicSubscriptionPattern =
-      TopicSubscriptionPattern(pattern, rebalanceListener, rebalanceHandler)
+      copy(rebalanceListener = Some(ref))
+    def withPartitionAssignmentHandler(value: PartitionAssignmentHandler): TopicSubscriptionPattern =
+      copy(partitionAssignmentHandler = value)
     def renderStageAttribute: String = s"pattern $pattern$renderListener"
   }
 

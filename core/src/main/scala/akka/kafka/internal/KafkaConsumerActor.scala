@@ -25,6 +25,7 @@ import akka.annotation.InternalApi
 import akka.util.JavaDurationConverters._
 import akka.event.LoggingReceive
 import akka.kafka.KafkaConsumerActor.StoppingException
+import akka.kafka.Subscriptions.PartitionAssignmentHandler
 import akka.kafka._
 import akka.stream.stage.AsyncCallback
 import org.apache.kafka.clients.consumer._
@@ -50,16 +51,12 @@ import scala.util.control.NonFatal
     final case class AssignWithOffset(tps: Map[TopicPartition, Long]) extends NoSerializationVerificationNeeded
     final case class AssignOffsetsForTimes(timestampsToSearch: Map[TopicPartition, Long])
         extends NoSerializationVerificationNeeded
-    final case class Subscribe(topics: Set[String],
-                               listener: ListenerCallbacks,
-                               rebalanceHandler: Subscriptions.PartitionAssignmentHandler)
+    final case class Subscribe(topics: Set[String], rebalanceHandler: Subscriptions.PartitionAssignmentHandler)
         extends SubscriptionRequest
         with NoSerializationVerificationNeeded
     case object RequestMetrics extends NoSerializationVerificationNeeded
     // Could be optimized to contain a Pattern as it used during reconciliation now, tho only in exceptional circumstances
-    final case class SubscribePattern(pattern: String,
-                                      listener: ListenerCallbacks,
-                                      rebalanceHandler: Subscriptions.PartitionAssignmentHandler)
+    final case class SubscribePattern(pattern: String, rebalanceHandler: Subscriptions.PartitionAssignmentHandler)
         extends SubscriptionRequest
         with NoSerializationVerificationNeeded
     final case class Seek(tps: Map[TopicPartition, Long]) extends NoSerializationVerificationNeeded
@@ -92,32 +89,31 @@ import scala.util.control.NonFatal
 
   }
 
-  final case class ListenerCallbacks(onAssign: Set[TopicPartition] => Unit, onRevoke: Set[TopicPartition] => Unit)
-      extends NoSerializationVerificationNeeded
+  final class PartitionedAssignmentAsyncCallbacks(subscription: AutoSubscription,
+                                                  sourceActor: ActorRef,
+                                                  partitionAssignedCB: AsyncCallback[Set[TopicPartition]],
+                                                  partitionRevokedCB: AsyncCallback[Set[TopicPartition]])
+      extends PartitionAssignmentHandler {
 
-  object ListenerCallbacks {
-    def apply(subscription: AutoSubscription,
-              sourceActor: ActorRef,
-              partitionAssignedCB: AsyncCallback[Set[TopicPartition]],
-              partitionRevokedCB: AsyncCallback[Set[TopicPartition]]): ListenerCallbacks =
-      KafkaConsumerActor.ListenerCallbacks(
-        assignedTps => {
-          subscription.rebalanceListener.foreach {
-            _.tell(TopicPartitionsAssigned(subscription, assignedTps), sourceActor)
-          }
-          if (assignedTps.nonEmpty) {
-            partitionAssignedCB.invoke(assignedTps)
-          }
-        },
-        revokedTps => {
-          subscription.rebalanceListener.foreach {
-            _.tell(TopicPartitionsRevoked(subscription, revokedTps), sourceActor)
-          }
-          if (revokedTps.nonEmpty) {
-            partitionRevokedCB.invoke(revokedTps)
-          }
-        }
-      )
+    override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+      subscription.rebalanceListener.foreach {
+        _.tell(TopicPartitionsRevoked(subscription, revokedTps), sourceActor)
+      }
+      if (revokedTps.nonEmpty) {
+        partitionRevokedCB.invoke(revokedTps)
+      }
+    }
+
+    override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+      subscription.rebalanceListener.foreach {
+        _.tell(TopicPartitionsAssigned(subscription, assignedTps), sourceActor)
+      }
+      if (assignedTps.nonEmpty) {
+        partitionAssignedCB.invoke(assignedTps)
+      }
+    }
+
+    override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
   }
 
   private[KafkaConsumerActor] trait CommitRefreshing {
@@ -368,12 +364,12 @@ import scala.util.control.NonFatal
   def handleSubscription(subscription: SubscriptionRequest): Unit =
     try {
       subscription match {
-        case Subscribe(topics, listener, rebalanceHandler) =>
-          val callback = new RebalanceListener(listener, rebalanceHandler)
+        case Subscribe(topics, rebalanceHandler) =>
+          val callback = new RebalanceListener(rebalanceHandler)
           partitionAssignmentHandler = callback
           consumer.subscribe(topics.toList.asJava, callback)
-        case SubscribePattern(pattern, listener, rebalanceHandler) =>
-          val callback = new RebalanceListener(listener, rebalanceHandler)
+        case SubscribePattern(pattern, rebalanceHandler) =>
+          val callback = new RebalanceListener(rebalanceHandler)
           partitionAssignmentHandler = callback
           consumer.subscribe(Pattern.compile(pattern), callback)
       }
@@ -662,7 +658,6 @@ import scala.util.control.NonFatal
   private[KafkaConsumerActor] object RebalanceListEmpty extends RebalanceList
 
   private[KafkaConsumerActor] final class RebalanceListener(
-      listener: ListenerCallbacks,
       partitionAssignmentHandler: Subscriptions.PartitionAssignmentHandler
   ) extends RebalanceList {
 
@@ -676,7 +671,6 @@ import scala.util.control.NonFatal
       val startTime = System.nanoTime()
       partitionAssignmentHandler.onAssign(tps, restrictedConsumer)
       checkDuration(startTime, "onAssign")
-      listener.onAssign(tps)
       rebalanceInProgress = false
     }
 
@@ -685,7 +679,6 @@ import scala.util.control.NonFatal
       val startTime = System.nanoTime()
       partitionAssignmentHandler.onRevoke(revokedTps, restrictedConsumer)
       checkDuration(startTime, "onRevoke")
-      listener.onRevoke(revokedTps)
       commitRefreshing.revoke(revokedTps)
       rebalanceInProgress = true
     }
