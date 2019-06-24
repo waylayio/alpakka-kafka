@@ -25,7 +25,7 @@ import akka.annotation.InternalApi
 import akka.util.JavaDurationConverters._
 import akka.event.LoggingReceive
 import akka.kafka.KafkaConsumerActor.StoppingException
-import akka.kafka.Subscriptions.PartitionAssignmentHandler
+import akka.kafka.PartitionAssignmentHandler
 import akka.kafka._
 import akka.stream.stage.AsyncCallback
 import org.apache.kafka.clients.consumer._
@@ -51,12 +51,12 @@ import scala.util.control.NonFatal
     final case class AssignWithOffset(tps: Map[TopicPartition, Long]) extends NoSerializationVerificationNeeded
     final case class AssignOffsetsForTimes(timestampsToSearch: Map[TopicPartition, Long])
         extends NoSerializationVerificationNeeded
-    final case class Subscribe(topics: Set[String], rebalanceHandler: Subscriptions.PartitionAssignmentHandler)
+    final case class Subscribe(topics: Set[String], rebalanceHandler: PartitionAssignmentHandler)
         extends SubscriptionRequest
         with NoSerializationVerificationNeeded
     case object RequestMetrics extends NoSerializationVerificationNeeded
     // Could be optimized to contain a Pattern as it used during reconciliation now, tho only in exceptional circumstances
-    final case class SubscribePattern(pattern: String, rebalanceHandler: Subscriptions.PartitionAssignmentHandler)
+    final case class SubscribePattern(pattern: String, rebalanceHandler: PartitionAssignmentHandler)
         extends SubscriptionRequest
         with NoSerializationVerificationNeeded
     final case class Seek(tps: Map[TopicPartition, Long]) extends NoSerializationVerificationNeeded
@@ -87,33 +87,6 @@ import scala.util.control.NonFatal
     def nextNumber(): Int =
       number.incrementAndGet()
 
-  }
-
-  final class PartitionedAssignmentAsyncCallbacks(subscription: AutoSubscription,
-                                                  sourceActor: ActorRef,
-                                                  partitionAssignedCB: AsyncCallback[Set[TopicPartition]],
-                                                  partitionRevokedCB: AsyncCallback[Set[TopicPartition]])
-      extends PartitionAssignmentHandler {
-
-    override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
-      subscription.rebalanceListener.foreach {
-        _.tell(TopicPartitionsRevoked(subscription, revokedTps), sourceActor)
-      }
-      if (revokedTps.nonEmpty) {
-        partitionRevokedCB.invoke(revokedTps)
-      }
-    }
-
-    override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
-      subscription.rebalanceListener.foreach {
-        _.tell(TopicPartitionsAssigned(subscription, assignedTps), sourceActor)
-      }
-      if (assignedTps.nonEmpty) {
-        partitionAssignedCB.invoke(assignedTps)
-      }
-    }
-
-    override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
   }
 
   private[KafkaConsumerActor] trait CommitRefreshing {
@@ -228,7 +201,7 @@ import scala.util.control.NonFatal
   /** Limits the blocking on offsetForTimes */
   private val offsetForTimesTimeout = settings.getOffsetForTimesTimeout
 
-  /** Limits the blocking on position in [[RebalanceListener]] */
+  /** Limits the blocking on position in [[RebalanceListenerImpl]] */
   private val positionTimeout = settings.getPositionTimeout
 
   private var requests = Map.empty[ActorRef, RequestMessages]
@@ -244,7 +217,7 @@ import scala.util.control.NonFatal
 
   /**
    * While `true`, committing is delayed.
-   * Changed by `onPartitionsRevoked` and `onPartitionsAssigned` in [[RebalanceListener]].
+   * Changed by `onPartitionsRevoked` and `onPartitionsAssigned` in [[RebalanceListenerImpl]].
    */
   private var rebalanceInProgress = false
 
@@ -259,7 +232,7 @@ import scala.util.control.NonFatal
   private var rebalanceCommitSenders = Vector.empty[ActorRef]
 
   private var delayedPollInFlight = false
-  private var partitionAssignmentHandler: RebalanceList = RebalanceListEmpty
+  private var partitionAssignmentHandler: RebalanceListener = RebalanceListener.Empty
 
   def receive: Receive = LoggingReceive {
     case Assign(assignedTps) =>
@@ -365,11 +338,11 @@ import scala.util.control.NonFatal
     try {
       subscription match {
         case Subscribe(topics, rebalanceHandler) =>
-          val callback = new RebalanceListener(rebalanceHandler)
+          val callback = new RebalanceListenerImpl(rebalanceHandler)
           partitionAssignmentHandler = callback
           consumer.subscribe(topics.toList.asJava, callback)
         case SubscribePattern(pattern, rebalanceHandler) =>
-          val callback = new RebalanceListener(rebalanceHandler)
+          val callback = new RebalanceListenerImpl(rebalanceHandler)
           partitionAssignmentHandler = callback
           consumer.subscribe(Pattern.compile(pattern), callback)
       }
@@ -647,19 +620,27 @@ import scala.util.control.NonFatal
    * So these methods are always called on the same thread as the actor and we're safe to
    * touch internal state.
    */
-  private[KafkaConsumerActor] sealed trait RebalanceList
+  private[KafkaConsumerActor] sealed trait RebalanceListener
       extends ConsumerRebalanceListener
       with NoSerializationVerificationNeeded {
-    override def onPartitionsAssigned(partitions: java.util.Collection[TopicPartition]): Unit = ()
-    override def onPartitionsRevoked(partitions: java.util.Collection[TopicPartition]): Unit = ()
+    override def onPartitionsAssigned(partitions: java.util.Collection[TopicPartition]): Unit
+    override def onPartitionsRevoked(partitions: java.util.Collection[TopicPartition]): Unit
     def postStop(): Unit = ()
   }
 
-  private[KafkaConsumerActor] object RebalanceListEmpty extends RebalanceList
+  private[KafkaConsumerActor] object RebalanceListener {
+    object Empty extends RebalanceListener {
+      override def onPartitionsAssigned(partitions: java.util.Collection[TopicPartition]): Unit = ()
 
-  private[KafkaConsumerActor] final class RebalanceListener(
-      partitionAssignmentHandler: Subscriptions.PartitionAssignmentHandler
-  ) extends RebalanceList {
+      override def onPartitionsRevoked(partitions: java.util.Collection[TopicPartition]): Unit = ()
+
+      override def postStop(): Unit = ()
+    }
+  }
+
+  private[KafkaConsumerActor] final class RebalanceListenerImpl(
+      partitionAssignmentHandler: PartitionAssignmentHandler
+  ) extends RebalanceListener {
 
     private val restrictedConsumer = new RestrictedConsumer(consumer, settings.partitionHandlerWarning.*(0.95d).asJava)
     private val warningDuration = settings.partitionHandlerWarning.toNanos

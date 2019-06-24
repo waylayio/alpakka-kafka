@@ -103,8 +103,8 @@ class PartitionAssignmentHandlerSpec
 
   def seekOnAssign(
       offsetStoreActor: ActorRef
-  ): Subscriptions.PartitionAssignmentHandler =
-    new Subscriptions.PartitionAssignmentHandler() {
+  ): PartitionAssignmentHandler =
+    new PartitionAssignmentHandler() {
       implicit val timeout: Timeout = 3.seconds
 
       override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
@@ -175,8 +175,8 @@ class PartitionAssignmentHandlerSpec
 
     def commitOnRevoke(
         offsetStoreActor: ActorRef
-    ): Subscriptions.PartitionAssignmentHandler =
-      new Subscriptions.PartitionAssignmentHandler() {
+    ): PartitionAssignmentHandler =
+      new PartitionAssignmentHandler() {
         implicit val timeout: Timeout = 3.seconds
 
         override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()

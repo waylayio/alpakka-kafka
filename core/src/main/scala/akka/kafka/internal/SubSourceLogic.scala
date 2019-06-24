@@ -81,20 +81,20 @@ private abstract class SubSourceLogic[K, V, Msg](
     sourceActor.watch(consumerActor)
 
     def asyncCallbacks =
-      new KafkaConsumerActor.PartitionedAssignmentAsyncCallbacks(subscription,
-                                                                 sourceActor.ref,
-                                                                 partitionAssignedCB,
-                                                                 partitionRevokedCB)
+      new PartitionAssignmentHelpers.AsyncCallbacks(subscription,
+                                                    sourceActor.ref,
+                                                    partitionAssignedCB,
+                                                    partitionRevokedCB)
 
     subscription match {
       case TopicSubscription(topics, _, rebalanceHandler) =>
         consumerActor.tell(KafkaConsumerActor.Internal
-                             .Subscribe(topics, new PartitionAssignmentChain(asyncCallbacks, rebalanceHandler)),
+                             .Subscribe(topics, new PartitionAssignmentHelpers.Chain(asyncCallbacks, rebalanceHandler)),
                            sourceActor.ref)
       case TopicSubscriptionPattern(topics, _, rebalanceHandler) =>
         consumerActor.tell(
           KafkaConsumerActor.Internal
-            .SubscribePattern(topics, new PartitionAssignmentChain(asyncCallbacks, rebalanceHandler)),
+            .SubscribePattern(topics, new PartitionAssignmentHelpers.Chain(asyncCallbacks, rebalanceHandler)),
           sourceActor.ref
         )
     }
