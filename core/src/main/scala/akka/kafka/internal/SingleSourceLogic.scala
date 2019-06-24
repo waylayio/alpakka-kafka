@@ -58,8 +58,10 @@ class PartitionAssignmentChain(handler1: PartitionAssignmentHandler, handler2: P
     }
 
     val blockingRevokedCall = new PartitionAssignmentHandler {
+      override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
       override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit =
         blockingRevokedHandler(revokedTps)
+      override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
     }
 
     subscription match {

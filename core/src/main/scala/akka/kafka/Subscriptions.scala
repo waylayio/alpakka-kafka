@@ -76,7 +76,7 @@ object Subscriptions {
      * @param revokedTps The list of partitions that were assigned to the consumer on the last rebalance
      * @param consumer A restricted version of the internally used [[org.apache.kafka.clients.consumer.Consumer Consumer]]
      */
-    def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {}
+    def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit
 
     /**
      * See [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener#onPartitionsAssigned]]
@@ -84,7 +84,7 @@ object Subscriptions {
      * @param assignedTps The list of partitions that are now assigned to the consumer (may include partitions previously assigned to the consumer)
      * @param consumer A restricted version of the internally used [[org.apache.kafka.clients.consumer.Consumer Consumer]]
      */
-    def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {}
+    def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit
 
     /**
      * Called before a consumer is closed.
@@ -93,10 +93,14 @@ object Subscriptions {
      * @param revokedTps The list of partitions that are currently assigned to the consumer
      * @param consumer A restricted version of the internally used [[org.apache.kafka.clients.consumer.Consumer Consumer]]
      */
-    def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {}
+    def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit
   }
 
-  private object EmptyPartitionAssignmentHandler extends PartitionAssignmentHandler
+  private object EmptyPartitionAssignmentHandler extends PartitionAssignmentHandler {
+    override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
+    override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
+    override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
+  }
 
   /** INTERNAL API */
   @akka.annotation.InternalApi

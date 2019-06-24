@@ -132,6 +132,8 @@ class PartitionAssignmentHandlerSpec
 
       }
 
+      override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit =
+        onRevoke(revokedTps, consumer)
     }
 
   "External offsets" should {
@@ -184,6 +186,8 @@ class PartitionAssignmentHandlerSpec
         import akka.actor.typed.scaladsl.AskPattern._
         implicit val timeout: Timeout = 3.seconds
 
+        override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
+
         override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
           println(s"onRevoke($revokedTps)")
           val eventualUnit = offsetStoreActor.?[TpsOffsets](replyTo => RequestOffset(revokedTps, replyTo))
@@ -194,6 +198,7 @@ class PartitionAssignmentHandlerSpec
           consumer.commitSync(asMap.asJava)
         }
 
+        override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
       }
 
     "allow for less traffic to Kafka?" in assertAllStagesStopped {
@@ -230,7 +235,7 @@ class PartitionAssignmentHandlerSpec
       sleep(3.seconds, "to make it spin")
       val offsets1_1 = offsetStoreActor.?(OffsetStorage.RequestAll).futureValue.offsets
       // either partition is read first and we took 5 elements
-      val positionP0: Long = offsets1_1.getOrElse(new TopicPartition(topic, partition0), -1)
+      val positionP0: Long = offsets1_1.getOrElse(new TopicPartition(topic, partition0), -1L)
       val positionP1: Long = offsets1_1.getOrElse(new TopicPartition(topic, partition1), -1L)
       positionP0 max positionP1 shouldBe initialConsume
 
