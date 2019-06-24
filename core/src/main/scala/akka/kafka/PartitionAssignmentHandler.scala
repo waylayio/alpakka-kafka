@@ -12,6 +12,9 @@ import org.apache.kafka.common.TopicPartition
  * Use with care: These callbacks are called synchronously on the same thread Kafka's `poll()` is called.
  * A warning will be logged if a callback takes longer than the configured `partition-handler-warning`.
  *
+ * There is no point in calling `CommittableOffset`'s commit methods as their committing won't be executed as long as any of
+ * the callbacks in this class are called.
+ *
  * This complements the methods of the [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener ConsumerRebalanceListener]] with
  * an `onStop` callback.
  */

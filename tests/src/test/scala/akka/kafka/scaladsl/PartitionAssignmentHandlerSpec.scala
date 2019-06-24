@@ -98,39 +98,34 @@ class PartitionAssignmentHandlerSpec
   val businessLogic: Flow[ConsumerRecord[String, String], ConsumerRecord[String, String], NotUsed] =
     Flow[ConsumerRecord[String, String]]
 
-  def storeLastSeenOffset(offsetStoreActor: ActorRef, tp: TopicPartition, offset: Long) =
-    offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset)
+  "External offsets" should {
 
-  def seekOnAssign(
-      offsetStoreActor: ActorRef
-  ): PartitionAssignmentHandler =
-    new PartitionAssignmentHandler() {
-      implicit val timeout: Timeout = 3.seconds
+    def seekOnAssign(offsetStoreActor: ActorRef): PartitionAssignmentHandler =
+      new PartitionAssignmentHandler() {
+        implicit val timeout: Timeout = 3.seconds
 
-      override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
-        val offsets = revokedTps.map(tp => tp -> consumer.position(tp)).toMap
-        // TODO fire and forget?
-        val eventualDone = offsetStoreActor ? StorePositions(offsets)
-      }
-
-      override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
-        val eventualUnit = (offsetStoreActor ? RequestOffset(assignedTps)).mapTo[TpsOffsets]
-        val tpsOffsets = Await.result(eventualUnit, 30.seconds)
-        println(s"onAssign($assignedTps) got $tpsOffsets")
-
-        tpsOffsets.offsets.foreach {
-          case (tp, offset) =>
-            println(s"seek($tp, ${offset + 1L})")
-            consumer.seek(tp, offset + 1L)
+        override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+          val offsets = revokedTps.map(tp => tp -> consumer.position(tp)).toMap
+          offsetStoreActor ! StorePositions(offsets)
         }
 
+        override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+          val eventualUnit = (offsetStoreActor ? RequestOffset(assignedTps)).mapTo[TpsOffsets]
+          val tpsOffsets = Await.result(eventualUnit, 30.seconds)
+          println(s"onAssign($assignedTps) got $tpsOffsets")
+
+          tpsOffsets.offsets.foreach {
+            case (tp, offset) =>
+              println(s"seek($tp, ${offset + 1L})")
+              consumer.seek(tp, offset + 1L)
+          }
+
+        }
+
+        override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit =
+          onRevoke(revokedTps, consumer)
       }
 
-      override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit =
-        onRevoke(revokedTps, consumer)
-    }
-
-  "External offsets" should {
     "be updated from mapAsync" in assertAllStagesStopped {
       val groupId = createGroupId()
       val topic = createTopic(suffix = 0, partitions = 2)
@@ -150,7 +145,7 @@ class PartitionAssignmentHandlerSpec
         .mapAsync(1) { consumerRecord: ConsumerRecord[String, String] =>
           val tp = new TopicPartition(consumerRecord.topic(), consumerRecord.partition())
           val offset = consumerRecord.offset()
-          storeLastSeenOffset(offsetStoreActor, tp, offset).map(_ => consumerRecord.value())
+          (offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset)).map(_ => consumerRecord.value())
         }
         .toMat(Sink.seq)(Keep.both)
         .mapMaterializedValue(DrainingControl.apply)
@@ -217,7 +212,7 @@ class PartitionAssignmentHandlerSpec
         .mapAsync(1) { consumerRecord: ConsumerRecord[String, String] =>
           val tp = new TopicPartition(consumerRecord.topic(), consumerRecord.partition())
           val offset = consumerRecord.offset()
-          storeLastSeenOffset(offsetStoreActor, tp, offset).map(_ => consumerRecord.value())
+          (offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset)).map(_ => consumerRecord.value())
         }
         .toMat(Sink.seq)(Keep.both)
         .mapMaterializedValue(DrainingControl.apply)
@@ -239,7 +234,7 @@ class PartitionAssignmentHandlerSpec
         .mapAsync(1) { consumerRecord: ConsumerRecord[String, String] =>
           val tp = new TopicPartition(consumerRecord.topic(), consumerRecord.partition())
           val offset = consumerRecord.offset()
-          storeLastSeenOffset(offsetStoreActor, tp, offset).map(_ => consumerRecord.value())
+          (offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset)).map(_ => consumerRecord.value())
         }
         .toMat(Sink.seq)(Keep.both)
         .mapMaterializedValue(DrainingControl.apply)
