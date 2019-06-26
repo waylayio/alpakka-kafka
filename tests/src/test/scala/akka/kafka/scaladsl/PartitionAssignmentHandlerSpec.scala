@@ -10,13 +10,12 @@ import akka.pattern.ask
 import akka.kafka._
 import akka.kafka.scaladsl.Consumer.DrainingControl
 import akka.kafka.scaladsl.OffsetStorage.{RequestOffset, StorePositions, TpsOffsets}
-import akka.kafka.testkit.scaladsl.EmbeddedKafkaLike
+import akka.kafka.testkit.scaladsl.TestcontainersKafkaLike
 import akka.stream.scaladsl.{Flow, Keep, Sink}
 import akka.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped
 import akka.util.JavaDurationConverters._
 import akka.util.Timeout
 import akka.{Done, NotUsed}
-import net.manub.embeddedkafka.EmbeddedKafkaConfig
 import org.apache.kafka.clients.consumer.{ConsumerRecord, OffsetAndMetadata}
 import org.apache.kafka.common.TopicPartition
 import org.scalatest._
@@ -75,20 +74,13 @@ object OffsetStorage {
 
 class PartitionAssignmentHandlerSpec
     extends SpecBase(kafkaPort = KafkaPorts.PartitionAssignmentHandlerSpec)
-    with EmbeddedKafkaLike
+    with TestcontainersKafkaLike
     with Inside
     with OptionValues {
 
   implicit val patience: PatienceConfig = PatienceConfig(30.seconds, 500.millis)
   implicit val timeout: Timeout = 3.seconds
 
-  override def createKafkaConfig: EmbeddedKafkaConfig =
-    EmbeddedKafkaConfig(kafkaPort,
-                        zooKeeperPort,
-                        Map(
-                          "num.partitions" -> "2",
-                          "offsets.topic.replication.factor" -> "1"
-                        ))
   final val Numbers0 = (1 to 20).map(_.toString + "-p0")
   final val Numbers1 = (1 to 20).map(_.toString + "-p1")
   final val partition1 = 1

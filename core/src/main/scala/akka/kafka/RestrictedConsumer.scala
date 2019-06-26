@@ -2,9 +2,7 @@
  * Copyright (C) 2014 - 2016 Softwaremill <http://softwaremill.com>
  * Copyright (C) 2016 - 2019 Lightbend Inc. <http://www.lightbend.com>
  */
-
 package akka.kafka
-import java.{lang, util}
 
 import org.apache.kafka.clients.consumer.{Consumer, OffsetAndMetadata}
 import org.apache.kafka.common.TopicPartition
@@ -23,7 +21,7 @@ final class RestrictedConsumer(consumer: Consumer[_, _], duration: java.time.Dur
   /**
    * See [[org.apache.kafka.clients.consumer.KafkaConsumer#beginningOffsets()]]
    */
-  def beginningOffsets(tps: java.util.Collection[TopicPartition]): java.util.Map[TopicPartition, lang.Long] =
+  def beginningOffsets(tps: java.util.Collection[TopicPartition]): java.util.Map[TopicPartition, java.lang.Long] =
     consumer.beginningOffsets(tps, duration)
 
   /**

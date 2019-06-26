@@ -27,7 +27,6 @@ import akka.event.LoggingReceive
 import akka.kafka.KafkaConsumerActor.StoppingException
 import akka.kafka.PartitionAssignmentHandler
 import akka.kafka._
-import akka.stream.stage.AsyncCallback
 import org.apache.kafka.clients.consumer._
 import org.apache.kafka.common.{Metric, MetricName, TopicPartition}
 
