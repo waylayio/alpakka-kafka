@@ -11,6 +11,7 @@ import akka.kafka._
 import akka.kafka.scaladsl.Consumer.DrainingControl
 import akka.kafka.scaladsl.OffsetStorage.{RequestOffset, StorePositions, TpsOffsets}
 import akka.kafka.testkit.scaladsl.TestcontainersKafkaLike
+import akka.stream.Supervision.Stop
 import akka.stream.scaladsl.{Flow, Keep, Sink}
 import akka.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped
 import akka.util.JavaDurationConverters._
@@ -257,4 +258,110 @@ class PartitionAssignmentHandlerSpec
   // Hit Kafka Timeout is hit in partitionHandler
 
   // How does an empty assign get handled (all partitions are balanced away)
+
+  "starting and stopping resources" should {
+
+    class DummyActor(topicPartition: TopicPartition) extends Actor {
+      override def receive: Receive = {
+        case Stop =>
+          log.debug("stopping actor for {}", topicPartition)
+          context.stop(self)
+          sender() ! Done
+
+        case msg: String =>
+          sender() ! Done
+      }
+    }
+
+    "work with partitioned sources" in {
+      val groupId = createGroupId()
+      val maxPartitions = 2
+      val topic = createTopic(suffix = 0, maxPartitions)
+
+      val consumerSettings = consumerDefaults.withStopTimeout(0.seconds).withGroupId(groupId)
+      val subscription = Subscriptions.topics(topic)
+
+      @volatile var resources = Map.empty[TopicPartition, ActorRef]
+
+      val control1 = Consumer
+        .plainPartitionedSource(consumerSettings, subscription)
+        .mapAsyncUnordered(maxPartitions) {
+          case (topicPartition, source) =>
+            val resource = system.actorOf(Props(new DummyActor(topicPartition)))
+            resources = resources + (topicPartition -> resource)
+            source
+              .mapAsync(1) { record =>
+                (resource ? record.value()).map(_ => record)
+              }
+              .runWith(Sink.ignore)
+              .flatMap(_ => resource ? Stop)
+              .map { _ =>
+                log.debug("removing {}", topicPartition)
+                resources = resources - topicPartition
+              }
+        }
+        .toMat(Sink.ignore)(Keep.both)
+        .mapMaterializedValue(DrainingControl.apply)
+        .run()
+
+      awaitProduce(produceString(topic, Numbers0, partition0), produceString(topic, Numbers1, partition1))
+
+      sleep(3.seconds, "to make it spin")
+
+      control1.drainAndShutdown().futureValue
+      resources shouldBe Symbol("empty")
+    }
+
+    "work with a handler" in {
+      val groupId = createGroupId()
+      val maxPartitions = 2
+      val topic = createTopic(suffix = 0, maxPartitions)
+
+      val consumerSettings = consumerDefaults.withStopTimeout(0.seconds).withGroupId(groupId)
+
+      var resources = Map.empty[TopicPartition, ActorRef]
+
+      val handler = new PartitionAssignmentHandler {
+        override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+          println(s"onRevoke $revokedTps")
+          revokedTps.foreach { tp =>
+            resources(tp) ! Stop
+            resources = resources - tp
+          }
+        }
+        override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+          println(s"onAssign $assignedTps")
+          assignedTps.foreach { tp =>
+            val resource = system.actorOf(Props(new DummyActor(tp)))
+            resources = resources + (tp -> resource)
+          }
+        }
+        override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+          println(s"onStop $revokedTps")
+          revokedTps.foreach { tp =>
+            resources(tp) ! Stop
+            resources = resources - tp
+          }
+        }
+      }
+      val subscription = Subscriptions.topics(topic).withPartitionAssignmentHandler(handler)
+
+      val control1 = Consumer
+        .plainSource(consumerSettings, subscription)
+        .mapAsyncUnordered(maxPartitions) { record =>
+          val resource = resources(new TopicPartition(record.topic(), record.partition()))
+          (resource ? record.value()).map(_ => record)
+        }
+        .toMat(Sink.ignore)(Keep.both)
+        .mapMaterializedValue(DrainingControl.apply)
+        .run()
+
+      awaitProduce(produceString(topic, Numbers0, partition0), produceString(topic, Numbers1, partition1))
+
+      sleep(3.seconds, "to make it spin")
+
+      control1.drainAndShutdown().futureValue
+      resources shouldBe Symbol("empty")
+    }
+  }
 }
