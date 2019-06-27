@@ -5,11 +5,15 @@
 
 package akka.kafka.scaladsl
 
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+
 import akka.actor.{Actor, ActorRef, Props}
+import akka.kafka.ConsumerMessage.CommittableMessage
 import akka.pattern.ask
 import akka.kafka._
 import akka.kafka.scaladsl.Consumer.DrainingControl
-import akka.kafka.scaladsl.OffsetStorage.{RequestOffset, StorePositions, TpsOffsets}
+import akka.kafka.scaladsl.OffsetStorage.{Clear, RequestOffset, StorePositions, TpsOffsets}
 import akka.kafka.testkit.scaladsl.TestcontainersKafkaLike
 import akka.stream.Supervision.Stop
 import akka.stream.scaladsl.{Flow, Keep, Sink}
@@ -22,18 +26,19 @@ import org.apache.kafka.common.TopicPartition
 import org.scalatest._
 
 import scala.collection.JavaConverters._
-import scala.concurrent.Await
+import scala.collection.immutable
+import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
 
 object OffsetStorage {
 
-  type TpOffsetMap = Map[TopicPartition, Long]
+  type TpOffsetMap = Map[TopicPartition, OffsetAndMetadata]
 
   final case class TpsOffsets(offsets: TpOffsetMap)
 
   sealed trait OffsetMessages
   final case class Clear() extends OffsetMessages
-  final case class StoreHandledOffset(tp: TopicPartition, offset: Long) extends OffsetMessages
+  final case class StoreHandledOffset(tp: TopicPartition, offset: Long, metadata: String) extends OffsetMessages
   final case class StorePositions(offsets: TpOffsetMap) extends OffsetMessages
   final case class RequestOffset(tps: Set[TopicPartition]) extends OffsetMessages
   final case class RequestAll() extends OffsetMessages
@@ -48,10 +53,10 @@ object OffsetStorage {
         sender() ! Done
         context.become(store(current ++ offsets))
 
-      case StoreHandledOffset(tp, offset) =>
+      case StoreHandledOffset(tp, offset, metadata) =>
         println(s"storing $tp -> ${offset + 1}")
         sender() ! Done
-        context.become(store(current.updated(tp, offset + 1L)))
+        context.become(store(current.updated(tp, new OffsetAndMetadata(offset + 1L, metadata))))
 
       case RequestOffset(tps) =>
         val tpsWithOffsets = tps
@@ -61,6 +66,7 @@ object OffsetStorage {
           }
           .toMap
         sender() ! TpsOffsets(tpsWithOffsets)
+        context.become(store(current -- tps))
 
       case RequestAll() =>
         sender() ! TpsOffsets(current)
@@ -98,7 +104,7 @@ class PartitionAssignmentHandlerSpec
         implicit val timeout: Timeout = 3.seconds
 
         override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
-          val offsets = revokedTps.map(tp => tp -> consumer.position(tp)).toMap
+          val offsets = revokedTps.map(tp => tp -> new OffsetAndMetadata(consumer.position(tp), "")).toMap
           offsetStoreActor ! StorePositions(offsets)
         }
 
@@ -108,9 +114,10 @@ class PartitionAssignmentHandlerSpec
           println(s"onAssign($assignedTps) got $tpsOffsets")
 
           tpsOffsets.offsets.foreach {
-            case (tp, offset) =>
-              println(s"seek($tp, ${offset + 1L})")
-              consumer.seek(tp, offset + 1L)
+            case (tp, offsetMeta) =>
+              val position = offsetMeta.offset + 1L
+              println(s"seek($tp, ${position})")
+              consumer.seek(tp, position)
           }
 
         }
@@ -138,7 +145,7 @@ class PartitionAssignmentHandlerSpec
         .mapAsync(1) { consumerRecord: ConsumerRecord[String, String] =>
           val tp = new TopicPartition(consumerRecord.topic(), consumerRecord.partition())
           val offset = consumerRecord.offset()
-          (offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset)).map(_ => consumerRecord.value())
+          (offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset, "")).map(_ => consumerRecord.value())
         }
         .toMat(Sink.seq)(Keep.both)
         .mapMaterializedValue(DrainingControl.apply)
@@ -171,11 +178,11 @@ class PartitionAssignmentHandlerSpec
 
         override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
           println(s"onRevoke($revokedTps)")
-          val eventualUnit = (offsetStoreActor ? RequestOffset(revokedTps)).mapTo[TpsOffsets]
-          val tpsOffsets = Await.result(eventualUnit, 30.seconds)
+          val availableOffsets = (offsetStoreActor ? RequestOffset(revokedTps)).mapTo[TpsOffsets]
+          val tpsOffsets = Await.result(availableOffsets, 30.seconds)
           println(s"onRevoke($revokedTps) got $tpsOffsets")
 
-          val asMap: Map[TopicPartition, OffsetAndMetadata] = tpsOffsets.offsets.mapValues(new OffsetAndMetadata(_))
+          val asMap: Map[TopicPartition, OffsetAndMetadata] = tpsOffsets.offsets
           consumer.commitSync(asMap.asJava)
         }
 
@@ -205,7 +212,7 @@ class PartitionAssignmentHandlerSpec
         .mapAsync(1) { consumerRecord: ConsumerRecord[String, String] =>
           val tp = new TopicPartition(consumerRecord.topic(), consumerRecord.partition())
           val offset = consumerRecord.offset()
-          (offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset)).map(_ => consumerRecord.value())
+          (offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset, "")).map(_ => consumerRecord.value())
         }
         .toMat(Sink.seq)(Keep.both)
         .mapMaterializedValue(DrainingControl.apply)
@@ -217,8 +224,8 @@ class PartitionAssignmentHandlerSpec
       sleep(3.seconds, "to make it spin")
       val offsets1_1 = (offsetStoreActor ? OffsetStorage.RequestAll()).mapTo[TpsOffsets].futureValue.offsets
       // either partition is read first and we took 5 elements
-      val positionP0: Long = offsets1_1.getOrElse(new TopicPartition(topic, partition0), -1L)
-      val positionP1: Long = offsets1_1.getOrElse(new TopicPartition(topic, partition1), -1L)
+      val positionP0: Long = offsets1_1.mapValues(_.offset).getOrElse(new TopicPartition(topic, partition0), -1L)
+      val positionP1: Long = offsets1_1.mapValues(_.offset).getOrElse(new TopicPartition(topic, partition1), -1L)
       positionP0 max positionP1 shouldBe initialConsume
 
       val control2 = Consumer
@@ -227,7 +234,7 @@ class PartitionAssignmentHandlerSpec
         .mapAsync(1) { consumerRecord: ConsumerRecord[String, String] =>
           val tp = new TopicPartition(consumerRecord.topic(), consumerRecord.partition())
           val offset = consumerRecord.offset()
-          (offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset)).map(_ => consumerRecord.value())
+          (offsetStoreActor ? OffsetStorage.StoreHandledOffset(tp, offset, "")).map(_ => consumerRecord.value())
         }
         .toMat(Sink.seq)(Keep.both)
         .mapMaterializedValue(DrainingControl.apply)
@@ -255,10 +262,10 @@ class PartitionAssignmentHandlerSpec
 
   }
 
-  // Hit Kafka Timeout is hit in partitionHandler
-
-  // How does an empty assign get handled (all partitions are balanced away)
-
+  /*
+   * These tests compare the use of partitioned sources and the partition assignment handler for managing
+   * resources connected to the assigned partitions.
+   */
   "starting and stopping resources" should {
 
     class DummyActor(topicPartition: TopicPartition) extends Actor {
@@ -364,4 +371,118 @@ class PartitionAssignmentHandlerSpec
       resources shouldBe Symbol("empty")
     }
   }
+
+  /*
+   * The use case for this test is to cancel processing of messages for a revoked partition that are in
+   * the stream already. This doesn't give idempotence, but gets closer.
+   */
+  "cancel processing of messages from revoked partitions" should {
+
+    class CurrentPartitions {
+      var currentlyAssigned = Set.empty[TopicPartition]
+
+      /** Kafka has signalled these partitions are revoked, but some may be re-assigned just after revoking. */
+      var partitionsToRevoke: Set[TopicPartition] = Set.empty
+
+      def onRevoke(revokedTps: Set[TopicPartition]): Unit =
+        partitionsToRevoke ++= revokedTps
+
+      def onAssign(assignedTps: Set[TopicPartition]): Unit = {
+        log.debug(s"onAssign $assignedTps")
+        currentlyAssigned = currentlyAssigned -- partitionsToRevoke ++ assignedTps
+      }
+    }
+
+    "work" in {
+      val groupId = createGroupId()
+      val maxPartitions = 2
+      val topic = createTopic(suffix = 0, maxPartitions)
+
+      val rebalanceFinished = new AtomicBoolean(false)
+
+      var store1 = List.empty[String]
+
+      def storeResult1 = { tup: (CommittableMessage[String, String], Int) =>
+        store1 = tup._1.record.value :: store1
+        // store result
+        Future.successful(tup)
+      }
+
+      val currentPartitions = new CurrentPartitions
+
+      val handler1 = new PartitionAssignmentHandler {
+        override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit =
+          currentPartitions.onRevoke(revokedTps)
+        override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
+          val partitions = assignedTps.map(_.partition)
+          log.debug(s"onAssign $partitions")
+          currentPartitions.onAssign(assignedTps)
+          if (assignedTps.size == 1) {
+            log.debug("rebalanceFinished")
+            rebalanceFinished.set(true)
+          }
+        }
+        override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit =
+          onRevoke(revokedTps, consumer)
+      }
+
+      val consumerSettings = consumerDefaults.withStopTimeout(0.seconds).withGroupId(groupId)
+      val subscription1 = Subscriptions.topics(topic).withPartitionAssignmentHandler(handler1)
+      val control1 = Consumer
+        .committableSource(consumerSettings, subscription1)
+        .mapAsync(maxPartitions)(lenthyOperation(rebalanceFinished))
+        .filter {
+          case (cm, _) =>
+            val keep =
+              currentPartitions.currentlyAssigned.contains(new TopicPartition(cm.record.topic, cm.record.partition))
+            log.debug(
+              s"$keep  ${cm.record.value} partition=${cm.record.partition()} ${currentPartitions.currentlyAssigned}"
+            )
+            keep
+        }
+        // store the result
+        .mapAsync(maxPartitions)(storeResult1)
+        .map {
+          case (cm, _) =>
+            cm.committableOffset
+        }
+        .toMat(Committer.sink(committerDefaults.withMaxBatch(1)))(Keep.both)
+        .mapMaterializedValue(DrainingControl.apply)
+        .run()
+
+      awaitProduce(produceString(topic, Numbers0, partition0), produceString(topic, Numbers1, partition1))
+
+      val subscription2 = Subscriptions.topics(topic)
+      val control2 = Consumer
+        .committableSource(consumerSettings, subscription2)
+        .map(_.committableOffset)
+        .toMat(Committer.sink(committerDefaults))(Keep.both)
+        .mapMaterializedValue(DrainingControl.apply)
+        .run()
+
+      eventually {
+        store1 should contain allElementsOf Numbers0
+      }
+      store1.diff(Numbers0).size shouldBe <(Numbers1.size)
+      control1.drainAndShutdown().futureValue shouldBe Done
+      control2.drainAndShutdown().futureValue shouldBe Done
+    }
+
+    def lenthyOperation(finish: AtomicBoolean) = { cm: CommittableMessage[String, String] =>
+      Thread.sleep(500)
+      // lengthy operation on the data
+      val result = 42
+      Future.successful((cm, result))
+    }
+
+  }
+
+  // Other questions/ideas
+
+  // Kafka Timeout is hit in partitionHandler
+
+  // How does an empty assign get handled (all partitions are balanced away)
+
+  // Any way to create a Committer that would support this
+
 }
