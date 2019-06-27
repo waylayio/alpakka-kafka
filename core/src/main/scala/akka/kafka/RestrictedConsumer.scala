@@ -2,15 +2,18 @@
  * Copyright (C) 2014 - 2016 Softwaremill <http://softwaremill.com>
  * Copyright (C) 2016 - 2019 Lightbend Inc. <http://www.lightbend.com>
  */
+
 package akka.kafka
 
+import akka.annotation.ApiMayChange
 import org.apache.kafka.clients.consumer.{Consumer, OffsetAndMetadata}
 import org.apache.kafka.common.TopicPartition
 
 /**
  * Offers parts of the [[org.apache.kafka.clients.consumer.Consumer]] API which becomes available to
- * the [[akka.kafka.Subscriptions.PartitionAssignmentHandler]] callbacks.
+ * the [[akka.kafka.PartitionAssignmentHandler]] callbacks.
  */
+@ApiMayChange
 final class RestrictedConsumer(consumer: Consumer[_, _], duration: java.time.Duration) {
 
   /**

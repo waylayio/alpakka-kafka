@@ -5,9 +5,12 @@
 
 package akka.kafka
 
+import akka.annotation.ApiMayChange
 import org.apache.kafka.common.TopicPartition
 
 /**
+ * The API is new and may change in further releases.
+ *
  * Allows to execute user code when Kafka rebalances partitions between consumers, or an Alpakka Kafka consumer is stopped.
  * Use with care: These callbacks are called synchronously on the same thread Kafka's `poll()` is called.
  * A warning will be logged if a callback takes longer than the configured `partition-handler-warning`.
@@ -15,9 +18,10 @@ import org.apache.kafka.common.TopicPartition
  * There is no point in calling `CommittableOffset`'s commit methods as their committing won't be executed as long as any of
  * the callbacks in this class are called.
  *
- * This complements the methods of the [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener ConsumerRebalanceListener]] with
+ * This complements the methods of Kafka's [[org.apache.kafka.clients.consumer.ConsumerRebalanceListener ConsumerRebalanceListener]] with
  * an `onStop` callback.
  */
+@ApiMayChange
 trait PartitionAssignmentHandler {
 
   /**
