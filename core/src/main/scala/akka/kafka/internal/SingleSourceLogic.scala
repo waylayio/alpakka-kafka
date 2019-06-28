@@ -8,14 +8,7 @@ package akka.kafka.internal
 import akka.actor.{ActorRef, ExtendedActorSystem, Terminated}
 import akka.annotation.InternalApi
 import akka.kafka.Subscriptions._
-import akka.kafka.{
-  AutoSubscription,
-  ConsumerSettings,
-  ManualSubscription,
-  PartitionAssignmentHandler,
-  RestrictedConsumer,
-  Subscription
-}
+import akka.kafka.{AutoSubscription, ConsumerSettings, ManualSubscription, PartitionAssignmentHandler, Subscription}
 import akka.stream.{ActorMaterializerHelper, SourceShape}
 import org.apache.kafka.common.TopicPartition
 
@@ -48,13 +41,6 @@ import scala.concurrent.{Future, Promise}
       new PartitionAssignmentHelpers.AsyncCallbacks(autoSubscription, sourceActor.ref, assignedCB, revokedCB)
     }
 
-    val blockingRevokedCall = new PartitionAssignmentHandler {
-      override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
-      override def onRevoke(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit =
-        blockingRevokedHandler(revokedTps)
-      override def onStop(revokedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = ()
-    }
-
     subscription match {
       case sub @ TopicSubscription(topics, _, partitionAssignment) =>
         consumerActor.tell(
@@ -62,16 +48,20 @@ import scala.concurrent.{Future, Promise}
             topics,
             new PartitionAssignmentHelpers.Chain(
               rebalanceListener(sub),
-              new PartitionAssignmentHelpers.Chain(partitionAssignment, blockingRevokedCall)
+              addToPartitionAssignmentHandler(partitionAssignment)
             )
           ),
           sourceActor.ref
         )
       case sub @ TopicSubscriptionPattern(topics, _, partitionAssignment) =>
         consumerActor.tell(
-          KafkaConsumerActor.Internal
-            .SubscribePattern(topics,
-                              new PartitionAssignmentHelpers.Chain(rebalanceListener(sub), partitionAssignment)),
+          KafkaConsumerActor.Internal.SubscribePattern(
+            topics,
+            new PartitionAssignmentHelpers.Chain(
+              rebalanceListener(sub),
+              addToPartitionAssignmentHandler(partitionAssignment)
+            )
+          ),
           sourceActor.ref
         )
       case s: ManualSubscription => configureManualSubscription(s)
@@ -125,5 +115,9 @@ import scala.concurrent.{Future, Promise}
     log.debug("Revoked partitions: {}. All partitions: {}", revokedTps, tps)
   }
 
-  protected def blockingRevokedHandler(revokedTps: Set[TopicPartition]): Unit = {}
+  /**
+   * Opportunity for subclasses to add their logic to the partition assignment callbacks.
+   */
+  protected def addToPartitionAssignmentHandler(handler: PartitionAssignmentHandler): PartitionAssignmentHandler =
+    handler
 }
