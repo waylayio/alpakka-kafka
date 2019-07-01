@@ -6,6 +6,7 @@
 package akka.kafka
 
 import akka.actor.ActorRef
+import akka.annotation.ApiMayChange
 import akka.kafka.internal.PartitionAssignmentHelpers.EmptyPartitionAssignmentHandler
 import org.apache.kafka.common.TopicPartition
 
@@ -39,13 +40,16 @@ sealed trait AutoSubscription extends Subscription {
   /** ActorRef which is to receive [[akka.kafka.ConsumerRebalanceEvent]] signals when rebalancing happens */
   def rebalanceListener: Option[ActorRef]
 
-  /** TODO */
+  /** Handler with callbacks call on partition assignment changes. */
   def partitionAssignmentHandler: PartitionAssignmentHandler
 
   /** Configure this actor ref to receive [[akka.kafka.ConsumerRebalanceEvent]] signals */
   def withRebalanceListener(ref: ActorRef): AutoSubscription
 
-  /** TODO */
+  /**
+   * API may change: This is an experimental API not recommended for production use, yet.
+   */
+  @ApiMayChange
   def withPartitionAssignmentHandler(value: PartitionAssignmentHandler): AutoSubscription
 
   override protected def renderListener: String =
@@ -71,8 +75,14 @@ object Subscriptions {
       extends AutoSubscription {
     def withRebalanceListener(ref: ActorRef): TopicSubscription =
       copy(rebalanceListener = Some(ref))
+
+    /**
+      * API may change: This is an experimental API not recommended for production use, yet.
+      */
+    @ApiMayChange
     def withPartitionAssignmentHandler(value: PartitionAssignmentHandler): TopicSubscription =
       copy(partitionAssignmentHandler = value)
+
     def renderStageAttribute: String = s"${tps.mkString(" ")}$renderListener"
   }
 
@@ -84,8 +94,14 @@ object Subscriptions {
       extends AutoSubscription {
     def withRebalanceListener(ref: ActorRef): TopicSubscriptionPattern =
       copy(rebalanceListener = Some(ref))
+
+    /**
+      * API may change: This is an experimental API not recommended for production use, yet.
+      */
+    @ApiMayChange
     def withPartitionAssignmentHandler(value: PartitionAssignmentHandler): TopicSubscriptionPattern =
       copy(partitionAssignmentHandler = value)
+
     def renderStageAttribute: String = s"pattern $pattern$renderListener"
   }
 
