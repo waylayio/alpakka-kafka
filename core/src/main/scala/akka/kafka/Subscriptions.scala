@@ -77,8 +77,8 @@ object Subscriptions {
       copy(rebalanceListener = Some(ref))
 
     /**
-      * API may change: This is an experimental API not recommended for production use, yet.
-      */
+     * API may change: This is an experimental API not recommended for production use, yet.
+     */
     @ApiMayChange
     def withPartitionAssignmentHandler(value: PartitionAssignmentHandler): TopicSubscription =
       copy(partitionAssignmentHandler = value)
@@ -96,8 +96,8 @@ object Subscriptions {
       copy(rebalanceListener = Some(ref))
 
     /**
-      * API may change: This is an experimental API not recommended for production use, yet.
-      */
+     * API may change: This is an experimental API not recommended for production use, yet.
+     */
     @ApiMayChange
     def withPartitionAssignmentHandler(value: PartitionAssignmentHandler): TopicSubscriptionPattern =
       copy(partitionAssignmentHandler = value)

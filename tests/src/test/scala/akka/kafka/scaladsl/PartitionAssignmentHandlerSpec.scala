@@ -5,16 +5,15 @@
 
 package akka.kafka.scaladsl
 
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.actor.{Actor, ActorRef, Props}
 import akka.kafka.ConsumerMessage.CommittableMessage
-import akka.pattern.ask
 import akka.kafka._
 import akka.kafka.scaladsl.Consumer.DrainingControl
-import akka.kafka.scaladsl.OffsetStorage.{Clear, RequestOffset, StorePositions, TpsOffsets}
+import akka.kafka.scaladsl.OffsetStorage.{RequestOffset, StorePositions, TpsOffsets}
 import akka.kafka.testkit.scaladsl.TestcontainersKafkaLike
+import akka.pattern.ask
 import akka.stream.Supervision.Stop
 import akka.stream.scaladsl.{Flow, Keep, Sink}
 import akka.stream.testkit.scaladsl.StreamTestKit.assertAllStagesStopped
@@ -26,9 +25,8 @@ import org.apache.kafka.common.TopicPartition
 import org.scalatest._
 
 import scala.collection.JavaConverters._
-import scala.collection.immutable
-import scala.concurrent.{Await, Future}
 import scala.concurrent.duration._
+import scala.concurrent.{Await, Future}
 
 object OffsetStorage {
 
@@ -49,12 +47,10 @@ object OffsetStorage {
 
     private def store(current: TpOffsetMap): Receive = {
       case StorePositions(offsets) =>
-        println(s"storing $offsets")
         sender() ! Done
         context.become(store(current ++ offsets))
 
       case StoreHandledOffset(tp, offset, metadata) =>
-        println(s"storing $tp -> ${offset + 1}")
         sender() ! Done
         context.become(store(current.updated(tp, new OffsetAndMetadata(offset + 1L, metadata))))
 
@@ -66,7 +62,6 @@ object OffsetStorage {
           }
           .toMap
         sender() ! TpsOffsets(tpsWithOffsets)
-        context.become(store(current -- tps))
 
       case RequestAll() =>
         sender() ! TpsOffsets(current)
@@ -109,8 +104,8 @@ class PartitionAssignmentHandlerSpec
         }
 
         override def onAssign(assignedTps: Set[TopicPartition], consumer: RestrictedConsumer): Unit = {
-          val eventualUnit = (offsetStoreActor ? RequestOffset(assignedTps)).mapTo[TpsOffsets]
-          val tpsOffsets = Await.result(eventualUnit, 30.seconds)
+          val offsets = (offsetStoreActor ? RequestOffset(assignedTps)).mapTo[TpsOffsets]
+          val tpsOffsets = Await.result(offsets, 30.seconds)
           println(s"onAssign($assignedTps) got $tpsOffsets")
 
           tpsOffsets.offsets.foreach {
@@ -159,8 +154,8 @@ class PartitionAssignmentHandlerSpec
 
       val map = (offsetStoreActor ? OffsetStorage.RequestAll()).mapTo[TpsOffsets].futureValue
 
-      map.offsets.get(new TopicPartition(topic, partition0)).value shouldBe Numbers0.size.toLong
-      map.offsets.get(new TopicPartition(topic, partition1)).value shouldBe Numbers1.size.toLong
+      map.offsets.get(new TopicPartition(topic, partition0)).value.offset shouldBe Numbers0.size.toLong
+      map.offsets.get(new TopicPartition(topic, partition1)).value.offset shouldBe Numbers1.size.toLong
 
       (offsetStoreActor ? OffsetStorage.Clear()).mapTo[Done].futureValue shouldBe Done
     }
@@ -224,8 +219,8 @@ class PartitionAssignmentHandlerSpec
       sleep(3.seconds, "to make it spin")
       val offsets1_1 = (offsetStoreActor ? OffsetStorage.RequestAll()).mapTo[TpsOffsets].futureValue.offsets
       // either partition is read first and we took 5 elements
-      val positionP0: Long = offsets1_1.mapValues(_.offset).getOrElse(new TopicPartition(topic, partition0), -1L)
-      val positionP1: Long = offsets1_1.mapValues(_.offset).getOrElse(new TopicPartition(topic, partition1), -1L)
+      val positionP0: Long = offsets1_1.get(new TopicPartition(topic, partition0)).map(_.offset).getOrElse(-1L)
+      val positionP1: Long = offsets1_1.get(new TopicPartition(topic, partition1)).map(_.offset).getOrElse(-1L)
       positionP0 max positionP1 shouldBe initialConsume
 
       val control2 = Consumer
@@ -256,8 +251,8 @@ class PartitionAssignmentHandlerSpec
       received should contain theSameElementsAs expextInConsumer2
 
       val offsets2 = (offsetStoreActor ? OffsetStorage.RequestAll()).mapTo[TpsOffsets].futureValue.offsets
-      offsets2.get(new TopicPartition(topic, partition0)).value shouldBe Numbers0.size
-      offsets2.get(new TopicPartition(topic, partition1)).value shouldBe Numbers1.size
+      offsets2.get(new TopicPartition(topic, partition0)).value.offset shouldBe Numbers0.size
+      offsets2.get(new TopicPartition(topic, partition1)).value.offset shouldBe Numbers1.size
     }
 
   }
