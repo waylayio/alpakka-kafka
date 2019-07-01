@@ -310,8 +310,10 @@ class PartitionAssignmentHandlerSpec
 
       sleep(3.seconds, "to make it spin")
 
-      control1.drainAndShutdown().futureValue
-      resources shouldBe Symbol("empty")
+      control1.drainAndShutdown().futureValue shouldBe Done
+      eventually { // failed on Travis
+        resources shouldBe Symbol("empty")
+      }
     }
 
     "work with a handler" in {
