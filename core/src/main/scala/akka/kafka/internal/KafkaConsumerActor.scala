@@ -25,8 +25,8 @@ import akka.annotation.InternalApi
 import akka.util.JavaDurationConverters._
 import akka.event.LoggingReceive
 import akka.kafka.KafkaConsumerActor.StoppingException
-import akka.kafka.PartitionAssignmentHandler
 import akka.kafka._
+import akka.kafka.scaladsl.PartitionAssignmentHandler
 import org.apache.kafka.clients.consumer._
 import org.apache.kafka.common.{Metric, MetricName, TopicPartition}
 

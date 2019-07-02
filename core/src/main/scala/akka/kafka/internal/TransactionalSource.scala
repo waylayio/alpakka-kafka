@@ -13,7 +13,8 @@ import akka.annotation.InternalApi
 import akka.kafka.ConsumerMessage.{PartitionOffset, TransactionalMessage}
 import akka.kafka.internal.KafkaConsumerActor.Internal.Revoked
 import akka.kafka.scaladsl.Consumer.Control
-import akka.kafka.{ConsumerFailed, ConsumerSettings, PartitionAssignmentHandler, RestrictedConsumer, Subscription}
+import akka.kafka.scaladsl.PartitionAssignmentHandler
+import akka.kafka.{ConsumerFailed, ConsumerSettings, RestrictedConsumer, Subscription}
 import akka.stream.SourceShape
 import akka.stream.stage.GraphStageLogic
 import akka.util.Timeout

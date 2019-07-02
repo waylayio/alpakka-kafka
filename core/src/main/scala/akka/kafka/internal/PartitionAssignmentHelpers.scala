@@ -7,16 +7,17 @@ package akka.kafka.internal
 
 import akka.actor.ActorRef
 import akka.annotation.InternalApi
-import akka.kafka.{
-  AutoSubscription,
-  PartitionAssignmentHandler,
-  RestrictedConsumer,
-  TopicPartitionsAssigned,
-  TopicPartitionsRevoked
-}
+import akka.kafka.scaladsl.PartitionAssignmentHandler
+import akka.kafka.{AutoSubscription, RestrictedConsumer, TopicPartitionsAssigned, TopicPartitionsRevoked}
 import akka.stream.stage.AsyncCallback
 import org.apache.kafka.common.TopicPartition
 
+/**
+ * Internal API.
+ *
+ * Implementations of [[PartitionAssignmentHandler]] for internal use.
+ */
+@InternalApi
 object PartitionAssignmentHelpers {
 
   @InternalApi

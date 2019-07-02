@@ -87,14 +87,14 @@ private abstract class SubSourceLogic[K, V, Msg](
                                                     partitionRevokedCB)
 
     subscription match {
-      case TopicSubscription(topics, _, rebalanceHandler) =>
+      case TopicSubscription(topics, _) =>
         consumerActor.tell(KafkaConsumerActor.Internal
-                             .Subscribe(topics, new PartitionAssignmentHelpers.Chain(asyncCallbacks, rebalanceHandler)),
+                             .Subscribe(topics, asyncCallbacks),
                            sourceActor.ref)
-      case TopicSubscriptionPattern(topics, _, rebalanceHandler) =>
+      case TopicSubscriptionPattern(topics, _) =>
         consumerActor.tell(
           KafkaConsumerActor.Internal
-            .SubscribePattern(topics, new PartitionAssignmentHelpers.Chain(asyncCallbacks, rebalanceHandler)),
+            .SubscribePattern(topics, asyncCallbacks),
           sourceActor.ref
         )
     }

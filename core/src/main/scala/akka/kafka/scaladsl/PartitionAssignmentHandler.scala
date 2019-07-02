@@ -3,9 +3,10 @@
  * Copyright (C) 2016 - 2019 Lightbend Inc. <http://www.lightbend.com>
  */
 
-package akka.kafka
+package akka.kafka.scaladsl
 
 import akka.annotation.ApiMayChange
+import akka.kafka.RestrictedConsumer
 import org.apache.kafka.common.TopicPartition
 
 /**

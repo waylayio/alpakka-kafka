@@ -8,7 +8,8 @@ package akka.kafka.internal
 import akka.actor.{ActorRef, ExtendedActorSystem, Terminated}
 import akka.annotation.InternalApi
 import akka.kafka.Subscriptions._
-import akka.kafka.{AutoSubscription, ConsumerSettings, ManualSubscription, PartitionAssignmentHandler, Subscription}
+import akka.kafka.scaladsl.PartitionAssignmentHandler
+import akka.kafka.{AutoSubscription, ConsumerSettings, ManualSubscription, Subscription}
 import akka.stream.{ActorMaterializerHelper, SourceShape}
 import org.apache.kafka.common.TopicPartition
 
@@ -42,25 +43,19 @@ import scala.concurrent.{Future, Promise}
     }
 
     subscription match {
-      case sub @ TopicSubscription(topics, _, partitionAssignment) =>
+      case sub @ TopicSubscription(topics, _) =>
         consumerActor.tell(
           KafkaConsumerActor.Internal.Subscribe(
             topics,
-            new PartitionAssignmentHelpers.Chain(
-              rebalanceListener(sub),
-              addToPartitionAssignmentHandler(partitionAssignment)
-            )
+            addToPartitionAssignmentHandler(rebalanceListener(sub))
           ),
           sourceActor.ref
         )
-      case sub @ TopicSubscriptionPattern(topics, _, partitionAssignment) =>
+      case sub @ TopicSubscriptionPattern(topics, _) =>
         consumerActor.tell(
           KafkaConsumerActor.Internal.SubscribePattern(
             topics,
-            new PartitionAssignmentHelpers.Chain(
-              rebalanceListener(sub),
-              addToPartitionAssignmentHandler(partitionAssignment)
-            )
+            addToPartitionAssignmentHandler(rebalanceListener(sub))
           ),
           sourceActor.ref
         )
