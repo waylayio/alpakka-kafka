@@ -1,4 +1,3 @@
-import com.typesafe.tools.mima.core.{Problem, ProblemFilters}
 
 enablePlugins(AutomateHeaderPlugin)
 
@@ -163,7 +162,7 @@ lazy val `alpakka-kafka` =
   project
     .in(file("."))
     .enablePlugins(ScalaUnidocPlugin)
-    .disablePlugins(SitePlugin, MimaPlugin)
+    .disablePlugins(SitePlugin)
     .settings(commonSettings)
     .settings(
       skip in publish := true,
@@ -222,17 +221,12 @@ lazy val core = project
         "org.scala-lang.modules" %% "scala-collection-compat" % "2.1.2"
       ) ++ silencer,
     Compile / compile / scalacOptions += "-P:silencer:globalFilters=[import scala.collection.compat._]",
-    mimaPreviousArtifacts := Set(
-        organization.value %% name.value % previousStableVersion.value
-          .getOrElse(throw new Error("Unable to determine previous version"))
-      ),
-    mimaBinaryIssueFilters += ProblemFilters.exclude[Problem]("akka.kafka.internal.*")
   )
 
 lazy val testkit = project
   .dependsOn(core)
   .enablePlugins(AutomateHeaderPlugin)
-  .disablePlugins(MimaPlugin, SitePlugin)
+  .disablePlugins(SitePlugin)
   .settings(commonSettings)
   .settings(
     name := "akka-stream-kafka-testkit",
@@ -248,16 +242,12 @@ lazy val testkit = project
         "org.apache.commons" % "commons-compress" % "1.19" % Provided, // embedded Kafka pulls in Avro which pulls in commons-compress 1.8.1
         embeddedKafka % Provided exclude ("log4j", "log4j")
       ) ++ silencer,
-    mimaPreviousArtifacts := Set(
-        organization.value %% name.value % previousStableVersion.value
-          .getOrElse(throw new Error("Unable to determine previous version"))
-      )
   )
 
 lazy val tests = project
   .dependsOn(core, testkit)
   .enablePlugins(AutomateHeaderPlugin)
-  .disablePlugins(MimaPlugin, SitePlugin)
+  .disablePlugins(SitePlugin)
   .configs(IntegrationTest.extend(Test))
   .settings(commonSettings)
   .settings(Defaults.itSettings)
@@ -319,7 +309,6 @@ lazy val tests = project
 
 lazy val docs = project
   .enablePlugins(AkkaParadoxPlugin, ParadoxSitePlugin, PreprocessPlugin, PublishRsyncPlugin)
-  .disablePlugins(/*BintrayPlugin,*/ MimaPlugin)
   .settings(commonSettings)
   .settings(
     name := "Alpakka Kafka",
@@ -377,7 +366,7 @@ lazy val docs = project
 lazy val benchmarks = project
   .dependsOn(core, testkit)
   .enablePlugins(AutomateHeaderPlugin)
-  .disablePlugins(MimaPlugin, SitePlugin)
+  .disablePlugins(SitePlugin)
   .configs(IntegrationTest)
   .settings(commonSettings)
   .settings(Defaults.itSettings)
