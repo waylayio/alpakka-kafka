@@ -17,7 +17,14 @@ import akka.kafka.internal.SubSourceLogic._
 import akka.kafka.internal.TransactionalSubSourceStageLogic.DrainingComplete
 import akka.kafka.scaladsl.Consumer.Control
 import akka.kafka.scaladsl.PartitionAssignmentHandler
-import akka.kafka.{AutoSubscription, ConsumerFailed, ConsumerSettings, RestrictedConsumer, Subscription}
+import akka.kafka.{
+  AutoSubscription,
+  ConsumerFailed,
+  ConsumerSettings,
+  RestrictedConsumer,
+  SubStreamContext,
+  Subscription
+}
 import akka.stream.SourceShape
 import akka.stream.scaladsl.Source
 import akka.stream.stage.{AsyncCallback, GraphStageLogic}
@@ -197,7 +204,11 @@ private[internal] abstract class TransactionalSourceLogic[K, V, Msg](shape: Sour
 private[kafka] final class TransactionalSubSource[K, V](
     consumerSettings: ConsumerSettings[K, V],
     subscription: AutoSubscription
-) extends KafkaSourceStage[K, V, (TopicPartition, Source[TransactionalMessage[K, V], NotUsed])](
+) extends KafkaSourceStage[K,
+                             V,
+                             (TopicPartition,
+                              Option[SubStreamContext[NotUsed]],
+                              Source[TransactionalMessage[K, V], NotUsed])](
       s"TransactionalSubSource ${subscription.renderStageAttribute}"
     ) {
   import TransactionalSourceLogic._
@@ -217,12 +228,15 @@ private[kafka] final class TransactionalSubSource[K, V](
   )
 
   override protected def logic(
-      shape: SourceShape[(TopicPartition, Source[TransactionalMessage[K, V], NotUsed])]
+      shape: SourceShape[
+        (TopicPartition, Option[SubStreamContext[NotUsed]], Source[TransactionalMessage[K, V], NotUsed])
+      ]
   ): GraphStageLogic with Control = {
-    val factory = new SubSourceStageLogicFactory[K, V, TransactionalMessage[K, V]] {
+    val factory = new SubSourceStageLogicFactory[K, V, NotUsed, TransactionalMessage[K, V]] {
       def create(
           shape: SourceShape[TransactionalMessage[K, V]],
           tp: TopicPartition,
+          context: Option[SubStreamContext[NotUsed]],
           consumerActor: ActorRef,
           subSourceStartedCb: AsyncCallback[SubSourceStageLogicControl],
           subSourceCancelledCb: AsyncCallback[(TopicPartition, SubSourceCancellationStrategy)],

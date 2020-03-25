@@ -270,7 +270,9 @@ object Consumer {
       settings: ConsumerSettings[K, V],
       subscription: AutoSubscription
   ): Source[(TopicPartition, Source[ConsumerRecord[K, V], NotUsed]), Control] =
-    Source.fromGraph(new PlainSubSource[K, V](settings, subscription, None, onRevoke = _ => ()))
+    Source.fromGraph(new PlainSubSource[K, V](settings, subscription, None, onRevoke = _ => ())).map {
+      case (tp, _, s) => (tp, s)
+    }
 
   /**
    * The `plainPartitionedManualOffsetSource` is similar to [[#plainPartitionedSource]] but allows the use of an offset store outside
@@ -287,7 +289,9 @@ object Consumer {
       getOffsetsOnAssign: Set[TopicPartition] => Future[Map[TopicPartition, Long]],
       onRevoke: Set[TopicPartition] => Unit = _ => ()
   ): Source[(TopicPartition, Source[ConsumerRecord[K, V], NotUsed]), Control] =
-    Source.fromGraph(new PlainSubSource[K, V](settings, subscription, Some(getOffsetsOnAssign), onRevoke))
+    Source.fromGraph(new PlainSubSource[K, V](settings, subscription, Some(getOffsetsOnAssign), onRevoke)).map {
+      case (tp, _, s) => (tp, s)
+    }
 
   /**
    * The same as [[#plainPartitionedManualOffsetSource]] but with offset commit support.
@@ -298,11 +302,34 @@ object Consumer {
       getOffsetsOnAssign: Set[TopicPartition] => Future[Map[TopicPartition, Long]],
       onRevoke: Set[TopicPartition] => Unit = _ => ()
   ): Source[(TopicPartition, Source[CommittableMessage[K, V], NotUsed]), Control] =
+    Source
+      .fromGraph(
+        new CommittableSubSource[K, V, NotUsed](
+          settings,
+          subscription,
+          getOffsetsOnAssign = Some(
+            getOffsetsOnAssign(_)
+              .map(_.mapValues(offset => (offset, NotUsed)).toMap)(ExecutionContexts.sameThreadExecutionContext)
+          ),
+          onRevoke = onRevoke
+        )
+      )
+      .map { case (tp, _, s) => (tp, s) }
+
+  /**
+   * The same as [[#plainPartitionedManualOffsetSource]] but with offset commit support and pass-through context.
+   */
+  def committablePartitionedManualOffsetWithContextSource[K, V, C](
+      settings: ConsumerSettings[K, V],
+      subscription: AutoSubscription,
+      getOffsetsOnAssign: Set[TopicPartition] => Future[Map[TopicPartition, (Long, C)]],
+      onRevoke: Set[TopicPartition] => Unit = _ => ()
+  ): Source[(TopicPartition, Option[SubStreamContext[C]], Source[CommittableMessage[K, V], NotUsed]), Control] =
     Source.fromGraph(
-      new CommittableSubSource[K, V](settings,
-                                     subscription,
-                                     getOffsetsOnAssign = Some(getOffsetsOnAssign),
-                                     onRevoke = onRevoke)
+      new CommittableSubSource[K, V, C](settings,
+                                        subscription,
+                                        getOffsetsOnAssign = Some(getOffsetsOnAssign),
+                                        onRevoke = onRevoke)
     )
 
   /**
@@ -312,7 +339,7 @@ object Consumer {
       settings: ConsumerSettings[K, V],
       subscription: AutoSubscription
   ): Source[(TopicPartition, Source[CommittableMessage[K, V], NotUsed]), Control] =
-    Source.fromGraph(new CommittableSubSource[K, V](settings, subscription))
+    Source.fromGraph(new CommittableSubSource[K, V, NotUsed](settings, subscription)).map { case (tp, _, s) => (tp, s) }
 
   /**
    * The same as [[#plainPartitionedSource]] but with offset commit with metadata support.
@@ -322,7 +349,9 @@ object Consumer {
       subscription: AutoSubscription,
       metadataFromRecord: ConsumerRecord[K, V] => String
   ): Source[(TopicPartition, Source[CommittableMessage[K, V], NotUsed]), Control] =
-    Source.fromGraph(new CommittableSubSource[K, V](settings, subscription, metadataFromRecord))
+    Source.fromGraph(new CommittableSubSource[K, V, NotUsed](settings, subscription, metadataFromRecord)).map {
+      case (tp, _, s) => (tp, s)
+    }
 
   /**
    * Special source that can use an external `KafkaAsyncConsumer`. This is useful when you have

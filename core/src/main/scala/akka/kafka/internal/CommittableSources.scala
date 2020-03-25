@@ -7,6 +7,7 @@ package akka.kafka.internal
 
 import akka.actor.ActorRef
 import akka.annotation.InternalApi
+import akka.dispatch.ExecutionContexts
 import akka.kafka.ConsumerMessage.{CommittableMessage, CommittableOffset, CommittableOffsetBatch}
 import akka.kafka._
 import akka.kafka.internal.KafkaConsumerActor.Internal.{Commit, CommitSingle, CommitWithoutReply}
@@ -22,6 +23,7 @@ import org.apache.kafka.clients.consumer.{ConsumerConfig, ConsumerRecord, Offset
 import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.requests.OffsetFetchResponse
 
+import scala.collection.immutable
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -92,23 +94,26 @@ private[kafka] final class ExternalCommittableSource[K, V](consumer: ActorRef,
 
 /** Internal API */
 @InternalApi
-private[kafka] final class CommittableSubSource[K, V](
+private[kafka] final class CommittableSubSource[K, V, C](
     settings: ConsumerSettings[K, V],
     subscription: AutoSubscription,
     _metadataFromRecord: ConsumerRecord[K, V] => String = CommittableMessageBuilder.NoMetadataFromRecord,
-    getOffsetsOnAssign: Option[Set[TopicPartition] => Future[Map[TopicPartition, Long]]] = None,
+    getOffsetsOnAssign: Option[Set[TopicPartition] => Future[immutable.Map[TopicPartition, (Long, C)]]] = None,
     onRevoke: Set[TopicPartition] => Unit = _ => ()
-) extends KafkaSourceStage[K, V, (TopicPartition, Source[CommittableMessage[K, V], NotUsed])](
+) extends KafkaSourceStage[K,
+                             V,
+                             (TopicPartition, Option[SubStreamContext[C]], Source[CommittableMessage[K, V], NotUsed])](
       s"CommittableSubSource ${subscription.renderStageAttribute}"
     ) {
   override protected def logic(
-      shape: SourceShape[(TopicPartition, Source[CommittableMessage[K, V], NotUsed])]
+      shape: SourceShape[(TopicPartition, Option[SubStreamContext[C]], Source[CommittableMessage[K, V], NotUsed])]
   ): GraphStageLogic with Control = {
 
-    val factory = new SubSourceStageLogicFactory[K, V, CommittableMessage[K, V]] {
+    val factory = new SubSourceStageLogicFactory[K, V, C, CommittableMessage[K, V]] {
       def create(
           shape: SourceShape[CommittableMessage[K, V]],
           tp: TopicPartition,
+          context: Option[SubStreamContext[C]],
           consumerActor: ActorRef,
           subSourceStartedCb: AsyncCallback[SubSourceStageLogicControl],
           subSourceCancelledCb: AsyncCallback[(TopicPartition, SubSourceCancellationStrategy)],
@@ -124,12 +129,20 @@ private[kafka] final class CommittableSubSource[K, V](
                                            _metadataFromRecord)
 
     }
-    new SubSourceLogic[K, V, CommittableMessage[K, V]](shape,
-                                                       settings,
-                                                       subscription,
-                                                       getOffsetsOnAssign,
-                                                       onRevoke,
-                                                       subSourceStageLogicFactory = factory)
+    new SubSourceLogic[K, V, C, CommittableMessage[K, V]](
+      shape,
+      settings,
+      subscription,
+      getOffsetsOnAssign.map(
+        goa =>
+          goa(_)
+            .map(_.mapValues { case (offset, c) => (offset, Some(c)) }.toMap)(
+              ExecutionContexts.sameThreadExecutionContext
+            )
+      ),
+      onRevoke,
+      subSourceStageLogicFactory = factory
+    )
   }
 }
 

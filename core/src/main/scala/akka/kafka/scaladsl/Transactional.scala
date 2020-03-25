@@ -70,7 +70,7 @@ object Transactional {
       settings: ConsumerSettings[K, V],
       subscription: AutoSubscription
   ): Source[(TopicPartition, Source[TransactionalMessage[K, V], NotUsed]), Control] =
-    Source.fromGraph(new TransactionalSubSource[K, V](settings, subscription))
+    Source.fromGraph(new TransactionalSubSource[K, V](settings, subscription)).map { case (tp, _, s) => (tp, s) }
 
   /**
    * Sink that is aware of the [[ConsumerMessage.TransactionalMessage.partitionOffset]] from a [[Transactional.source]].  It will
