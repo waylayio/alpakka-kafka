@@ -67,6 +67,7 @@ private class SubSourceLogic[K, V, C, Msg](
 
   /** Kafka has notified us that we have these partitions assigned, but we have not created a source for them yet. */
   private var pendingPartitions: immutable.Map[TopicPartition, Option[SubStreamContext[C]]] = immutable.Map.empty
+  private var partitionAssignedCBContext: immutable.Map[TopicPartition, SubStreamContext[C]] = immutable.Map.empty
 
   /** We have created a source for these partitions, but it has not started up and is not in subSources yet. */
   private var partitionsInStartup: immutable.Set[TopicPartition] = immutable.Set.empty
@@ -112,7 +113,10 @@ private class SubSourceLogic[K, V, C, Msg](
     }
     // make sure re-assigned partitions don't get closed on CloseRevokedPartitions timer
     partitionsToRevoke = partitionsToRevoke -- assigned
-    updatePendingPartitionsAndEmitSubSources(formerlyUnknown, Map.empty)
+    val contextCopy = partitionAssignedCBContext
+    // clear the global context passthrough variable to avoid memory leak
+    partitionAssignedCBContext = immutable.Map.empty
+    updatePendingPartitionsAndEmitSubSources(formerlyUnknown, contextCopy)
   }
 
   private val partitionRevokedCB = getAsyncCallback[Set[TopicPartition]] { revoked =>
@@ -286,6 +290,13 @@ private class SubSourceLogic[K, V, C, Msg](
       private def seekToOffsets(assignedTps: Set[TopicPartition],
                                 consumer: RestrictedConsumer,
                                 offsets: Map[TopicPartition, (Long, Option[C])]) = {
+        partitionAssignedCBContext = offsets.flatMap {
+          case (tp, (offset, cOpt)) =>
+            cOpt.fold(immutable.Map.empty[TopicPartition, SubStreamContext[C]]) { c =>
+              log.debug(s"($tp)->($c)")
+              immutable.Map(tp -> SubStreamContext(offset, c))
+            }
+        }
         // Filter out the offsetMap so that we only seek for partitions that have been assigned
         val filteredOffsets = offsets.filterKeys(assignedTps.contains).toMap
         log.debug(s"Synchronously seeking to offsets during rebalance: $filteredOffsets")
