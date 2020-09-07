@@ -1,4 +1,3 @@
-import com.typesafe.tools.mima.core.{Problem, ProblemFilters}
 
 enablePlugins(AutomateHeaderPlugin)
 
@@ -25,7 +24,16 @@ val scalatestVersion = "3.0.8"
 val testcontainersVersion = "1.14.3"
 val slf4jVersion = "1.7.30"
 val confluentAvroSerializerVersion = "5.4.1"
-
+val repoSettings = Seq(
+  publishTo := {
+    val nexus = "https://nexus.waylay.io"
+    Some("Waylay releases repo" at nexus + "/repository/maven-releases")
+  },
+  // TODO remove below hack when on sbt 1.1.x and we don't need the watch service any more
+  // https://github.com/sbt/sbt/issues/3519#issuecomment-331395080
+  // https://github.com/swoval/MacOSXWatchService/issues/19
+  updateOptions := updateOptions.value.withGigahorse(false)
+)
 val scalapb = "com.thesamet.scalapb" %% "scalapb-runtime" % "0.10.8"
 
 val kafkaBrokerWithoutSlf4jLog4j = "org.apache.kafka" %% "kafka" % kafkaVersion % Provided exclude ("org.slf4j", "slf4j-log4j12")
@@ -79,7 +87,7 @@ TaskKey[Unit]("verifyCodeFmt") := {
 addCommandAlias("verifyCodeStyle", "headerCheck; verifyCodeFmt")
 addCommandAlias("verifyDocs", ";+doc ;unidoc ;docs/paradoxBrowse")
 
-val commonSettings = Def.settings(
+val commonSettings = repoSettings++Def.settings(
   organization := "com.typesafe.akka",
   organizationName := "Lightbend Inc.",
   organizationHomepage := Some(url("https://www.lightbend.com/")),
@@ -154,7 +162,6 @@ val commonSettings = Def.settings(
   // -s Try to decode Scala names in stack traces and test names.
   testOptions += Tests.Argument(jupiterTestFramework, "-a", "-v", "-q", "-s"),
   scalafmtOnCompile := true,
-  ThisBuild / mimaReportSignatureProblems := true,
   headerLicense := Some(
       HeaderLicense.Custom(
         """|Copyright (C) 2014 - 2016 Softwaremill <https://softwaremill.com>
@@ -162,9 +169,9 @@ val commonSettings = Def.settings(
            |""".stripMargin
       )
     ),
-  bintrayOrganization := Some("akka"),
-  bintrayPackage := "alpakka-kafka",
-  bintrayRepository := (if (isSnapshot.value) "snapshots" else "maven"),
+  //bintrayOrganization := Some("akka"),
+  //bintrayPackage := "alpakka-kafka",
+  //bintrayRepository := (if (isSnapshot.value) "snapshots" else "maven"),
   projectInfoVersion := (if (isSnapshot.value) "snapshot" else version.value)
 )
 
@@ -172,7 +179,7 @@ lazy val `alpakka-kafka` =
   project
     .in(file("."))
     .enablePlugins(ScalaUnidocPlugin)
-    .disablePlugins(SitePlugin, MimaPlugin)
+    .disablePlugins(SitePlugin)
     .settings(commonSettings)
     .settings(
       skip in publish := true,
@@ -233,18 +240,14 @@ lazy val core = project
         "org.apache.kafka" % "kafka-clients" % kafkaVersion,
         "org.scala-lang.modules" %% "scala-collection-compat" % "2.1.6"
       ) ++ silencer,
-    Compile / compile / scalacOptions += "-P:silencer:globalFilters=[import scala.collection.compat._]",
-    mimaPreviousArtifacts := Set(
-        organization.value %% name.value % previousStableVersion.value
-          .getOrElse(throw new Error("Unable to determine previous version"))
-      ),
-    mimaBinaryIssueFilters += ProblemFilters.exclude[Problem]("akka.kafka.internal.*")
+    Compile / compile / scalacOptions += "-P:silencer:globalFilters=[import scala.collection.compat._]"
+
   )
 
 lazy val testkit = project
   .dependsOn(core)
   .enablePlugins(AutomateHeaderPlugin)
-  .disablePlugins(MimaPlugin, SitePlugin)
+  .disablePlugins(SitePlugin)
   .settings(commonSettings)
   .settings(
     name := "akka-stream-kafka-testkit",
@@ -260,11 +263,8 @@ lazy val testkit = project
         "org.apache.kafka" %% "kafka" % kafkaVersion % Provided exclude ("org.slf4j", "slf4j-log4j12"),
         "org.apache.commons" % "commons-compress" % "1.20" % Provided, // embedded Kafka pulls in Avro which pulls in commons-compress 1.8.1
         embeddedKafka % Provided exclude ("log4j", "log4j")
-      ) ++ silencer,
-    mimaPreviousArtifacts := Set(
-        organization.value %% name.value % previousStableVersion.value
-          .getOrElse(throw new Error("Unable to determine previous version"))
-      )
+      ) ++ silencer
+
   )
 
 /**
@@ -284,17 +284,13 @@ lazy val clusterSharding = project
     AutomaticModuleName.settings("akka.stream.alpakka.kafka.cluster.sharding"),
     libraryDependencies ++= Seq(
         "com.typesafe.akka" %% "akka-cluster-sharding-typed" % akkaVersion26
-      ) ++ silencer,
-    mimaPreviousArtifacts := Set(
-        organization.value %% name.value % previousStableVersion.value
-          .getOrElse(throw new Error("Unable to determine previous version"))
-      )
+      ) ++ silencer
   )
 
 lazy val tests = project
   .dependsOn(core, testkit)
   .enablePlugins(AutomateHeaderPlugin)
-  .disablePlugins(MimaPlugin, SitePlugin)
+  .disablePlugins(SitePlugin)
   .configs(IntegrationTest.extend(Test))
   .settings(commonSettings)
   .settings(Defaults.itSettings)
@@ -361,7 +357,6 @@ lazy val tests = project
 
 lazy val docs = project
   .enablePlugins(AkkaParadoxPlugin, ParadoxSitePlugin, PreprocessPlugin, PublishRsyncPlugin)
-  .disablePlugins(BintrayPlugin, MimaPlugin)
   .settings(commonSettings)
   .settings(
     name := "Alpakka Kafka",
@@ -431,7 +426,7 @@ lazy val docs = project
 lazy val benchmarks = project
   .dependsOn(core, testkit)
   .enablePlugins(AutomateHeaderPlugin)
-  .disablePlugins(MimaPlugin, SitePlugin)
+  .disablePlugins(SitePlugin)
   .configs(IntegrationTest)
   .settings(commonSettings)
   .settings(Defaults.itSettings)
